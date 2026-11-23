@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BLOX STRIKE — 3D Arcade Shooter</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 3D WebGL2 Viewport & 2D Crisp Overlay -->
+  <canvas id="game-canvas"></canvas>
+  <canvas id="overlay-canvas"></canvas>
+
+  <!-- Damage Vignette & Sniper Scope -->
+  <div id="damage-vignette"></div>
+  <div id="sniper-scope" class="hidden">
+    <div class="scope-ring">
+      <div class="scope-h"></div>
+      <div class="scope-v"></div>
+      <div class="scope-dot"></div>
+    </div>
+  </div>
+
+  <!-- In-Game HUD -->
+  <div id="hud" class="hidden">
+    <!-- Top Left: Live Radar & Netcode Status -->
+    <div class="hud-top-left">
+      <div class="minimap-frame">
+        <canvas id="minimap-canvas" width="144" height="144"></canvas>
+      </div>
+      <div class="net-pill" title="Simulation decoupled via LocalLoopbackTransport — ready for WebSocket multiplayer">
+        <span class="net-dot"></span> LOCAL HOST • 60Hz • MP-READY
+      </div>
+    </div>
+
+    <!-- Top Center: Scoreboard Pill & Timer -->
+    <div class="hud-top-center">
+      <div class="score-bar">
+        <div id="score-blue" class="score-side blue">BLUE 0</div>
+        <div class="score-mid">
+          <div id="hud-mode-label" class="mode-tag">TDM</div>
+          <div id="hud-timer" class="timer-val">5:00</div>
+        </div>
+        <div id="score-red" class="score-side red">RED 0</div>
+      </div>
+    </div>
+
+    <!-- Top Right: Killfeed -->
+    <div id="killfeed" class="hud-top-right"></div>
+
+    <!-- Center-Top: Killstreak / Powerup Banner -->
+    <div id="announce-banner" class="announce-banner hidden">
+      <div id="announce-title" class="announce-title">DOUBLE KILL!</div>
+      <div id="announce-sub" class="announce-sub">2 KO STREAK</div>
+    </div>
+
+    <!-- Center: Dynamic Crosshair & Hitmarker -->
+    <div id="crosshair" class="crosshair">
+      <span class="ch-line top"></span>
+      <span class="ch-line bottom"></span>
+      <span class="ch-line left"></span>
+      <span class="ch-line right"></span>
+      <span class="ch-dot"></span>
+    </div>
+    <div id="hitmarker" class="hitmarker">
+      <span class="hm-a"></span>
+      <span class="hm-b"></span>
+    </div>
+
+    <!-- Bottom Left: Health, Shield, Dash, Camera Mode -->
+    <div class="hud-bottom-left">
+      <div class="status-pills">
+        <span id="cam-mode-pill" class="mini-pill">1ST PERSON [V]</span>
+        <span id="speed-pill" class="mini-pill gold hidden">SPEED BOOST</span>
+      </div>
+      <div class="stat-card">
+        <div class="bar-row">
+          <span class="bar-icon shield">◆</span>
+          <div class="bar-track thin"><div id="shield-fill" class="bar-fill shield"></div></div>
+          <span id="shield-val" class="bar-num small">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-icon hp">✚</span>
+          <div class="bar-track"><div id="hp-fill" class="bar-fill hp"></div></div>
+          <span id="hp-val" class="bar-num">100</span>
+        </div>
+        <div class="dash-row">
+          <div class="dash-track"><div id="dash-fill" class="dash-fill"></div></div>
+          <span id="dash-label" class="dash-label">DASH READY [SHIFT]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Center: Classic Roblox 6-Slot Weapon Hotbar -->
+    <div id="weapon-hotbar" class="weapon-hotbar"></div>
+
+    <!-- Bottom Right: Active Weapon & Ammo -->
+    <div class="hud-bottom-right">
+      <div id="reload-wrap" class="reload-wrap hidden">
+        <span class="reload-text">RELOADING</span>
+        <div class="reload-track"><div id="reload-fill" class="reload-fill"></div></div>
+      </div>
+      <div class="ammo-card">
+        <div id="weapon-name" class="weapon-name">BLOX-AR</div>
+        <div class="ammo-nums">
+          <span id="ammo-cur" class="ammo-cur">30</span>
+          <span id="ammo-max" class="ammo-max">/ 30</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Respawn Overlay -->
+    <div id="respawn-overlay" class="respawn-overlay hidden">
+      <div class="respawn-box">
+        <div class="respawn-title">SHATTERED!</div>
+        <div class="respawn-sub">Respawning in <span id="respawn-timer">3.0s</span></div>
+      </div>
+    </div>
+
+    <div id="click-to-play" class="click-to-play hidden">CLICK TO PLAY</div>
+  </div>
+
+  <!-- TAB Scoreboard -->
+  <div id="scoreboard-overlay" class="modal-backdrop hidden">
+    <div class="scoreboard-panel">
+      <div class="sb-header">MATCH SCOREBOARD</div>
+      <table class="sb-table">
+        <thead>
+          <tr><th>#</th><th>PLAYER</th><th>KILLS</th><th>DEATHS</th><th>K/D</th><th>SCORE</th></tr>
+        </thead>
+        <tbody id="scoreboard-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Main Lobby Menu (floats cleanly over live 3D arena battle!) -->
+  <div id="menu-overlay" class="menu-overlay">
+    <div class="menu-container">
+      <div class="brand-header">
+        <div class="brand-badge">3D WEBGL2 • LOCAL + MULTIPLAYER-READY ARCHITECTURE</div>
+        <h1 class="brand-title">BLOX <span>STRIKE</span></h1>
+        <p class="brand-sub">Fast-paced Roblox-inspired arena shooter with 6 weapons, jump pads, dashes &amp; smart AI bots.</p>
+      </div>
+
+      <div class="menu-grid">
+        <div class="menu-panel">
+          <div class="section-label">GAME MODE</div>
+          <div id="mode-grid" class="card-grid cols-2"></div>
+
+          <div class="section-label">ARENA MAP</div>
+          <div id="map-grid" class="card-grid cols-3"></div>
+        </div>
+
+        <div class="menu-panel side">
+          <div class="section-label">LOADOUT &amp; PROFILE</div>
+          <label class="field">
+            <span>BLOX TAG</span>
+            <input id="input-player-name" type="text" maxlength="16" placeholder="BloxPlayer" />
+          </label>
+
+          <div class="field">
+            <span>AVATAR STYLE</span>
+            <div id="skin-row" class="skin-row"></div>
+          </div>
+
+          <div class="field">
+            <span>HAT / ACCESSORY</span>
+            <div id="hat-row" class="skin-row"></div>
+          </div>
+
+          <div class="field-row">
+            <label class="field">
+              <span>BOTS: <strong id="val-bots">7</strong></span>
+              <input id="slider-bots" type="range" min="1" max="11" value="7" />
+            </label>
+            <label class="field">
+              <span>BOT SKILL</span>
+              <select id="select-difficulty">
+                <option value="easy">Chill (Easy)</option>
+                <option value="medium" selected>Rival (Medium)</option>
+                <option value="hard">Sweaty (Hard)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="controls-mini">
+            <div><kbd>WASD</kbd> Move</div>
+            <div><kbd>SPACE</kbd> Jump</div>
+            <div><kbd>SHIFT</kbd> Dash</div>
+            <div><kbd>LMB</kbd> Fire</div>
+            <div><kbd>RMB</kbd> Aim / Scope</div>
+            <div><kbd>1-6</kbd> Weapons</div>
+            <div><kbd>R</kbd> Reload</div>
+            <div><kbd>V</kbd> 1st / 3rd Cam</div>
+            <div><kbd>TAB</kbd> Scoreboard</div>
+          </div>
+
+          <button id="btn-play" class="btn-primary huge">
+            <span>DEPLOY TO ARENA</span>
+            <span class="btn-arrow">▶</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause & Settings Modal -->
+  <div id="pause-overlay" class="modal-backdrop hidden">
+    <div class="pause-panel">
+      <h2>PAUSED</h2>
+      <p id="pause-hint" class="pause-hint">Press <strong>RESUME</strong> to lock mouse and jump right back in.</p>
+      <div class="settings-box">
+        <label class="field">
+          <span>MOUSE SENSITIVITY: <strong id="val-sens">100%</strong></span>
+          <input id="slider-sens" type="range" min="25" max="250" value="100" />
+        </label>
+        <label class="field">
+          <span>SFX VOLUME: <strong id="val-vol">60%</strong></span>
+          <input id="slider-vol" type="range" min="0" max="100" value="60" />
+        </label>
+      </div>
+      <div class="pause-actions">
+        <button id="btn-resume" class="btn-primary">RESUME MATCH</button>
+        <button id="btn-restart" class="btn-secondary">RESTART MATCH</button>
+        <button id="btn-main-menu" class="btn-ghost">MAIN LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Victory / Match End Modal -->
+  <div id="victory-overlay" class="modal-backdrop hidden">
+    <div class="victory-panel">
+      <div class="victory-tag">MATCH COMPLETE</div>
+      <h2 id="victory-winner" class="victory-winner">BLUE TEAM</h2>
+      <p id="victory-reason" class="victory-reason"></p>
+      <table class="sb-table compact">
+        <thead>
+          <tr><th>#</th><th>PLAYER</th><th>KILLS</th><th>DEATHS</th><th>K/D</th><th>SCORE</th></tr>
+        </thead>
+        <tbody id="victory-board-body"></tbody>
+      </table>
+      <div class="victory-actions">
+        <button id="btn-play-again" class="btn-primary">PLAY AGAIN</button>
+        <button id="btn-victory-menu" class="btn-secondary">CHANGE MODE / MAP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modular scripts (no bundler needed — works directly via file:// or localhost!) -->
+  <script src="js/config.js"></script>
+  <script src="js/models.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/client.js"></script>
+</body>
+</html>
