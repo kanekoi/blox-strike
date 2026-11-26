@@ -25,6 +25,16 @@
     DASH_SPEED: 19.5,
     DASH_DURATION: 0.18,
     DASH_COOLDOWN: 2.2,
+    CROUCH_HEIGHT: 1.22,
+    CROUCH_EYE_HEIGHT: 0.96,
+    CROUCH_HEAD_MIN_Y: 0.78,
+    CROUCH_SPEED_MULT: 0.6,
+    SLIDE_SPEED: 14.4,
+    SLIDE_MIN_SPEED: 4.5,
+    SLIDE_DURATION: 0.65,
+    SLIDE_COOLDOWN: 0.85,
+    SLIDE_FRICTION: 2.4,
+    SLIDE_HOP_BOOST: 1.25,
     MAX_HP: 100,
     MAX_SHIELD: 50,
     RESPAWN_TIME: 3.0,
@@ -221,6 +231,28 @@
     BOUNTY_PER_EXTRA_KILL: 40,
     BOUNTY_MAX_XP: 350,
     KOTH_XP_PER_SEC: 8,
+  };
+
+  BS.GRENADE = {
+    COOLDOWN: 7.0,
+    THROW_SPEED: 21.5,
+    UP_VEL: 4.2,
+    GRAVITY: 22.0,
+    FUSE: 1.55,
+    BOUNCE: 0.52,
+    SPLASH_RADIUS: 6.2,
+    DAMAGE: 95,
+    KNOCKBACK: 15.5,
+    SELF_DMG_MULT: 0.3,
+  };
+
+  BS.BARREL = {
+    MAX_HP: 45,
+    RESPAWN_TIME: 14.0,
+    SPLASH_RADIUS: 6.8,
+    DAMAGE: 115,
+    KNOCKBACK: 18.0,
+    CHAIN_DELAY: 0.14,
   };
 
   // CS2-inspired weapon finishes (procedural 256x256 textures + metallic shader sheen)
@@ -573,9 +605,13 @@
         { m: 'flag', x: 8, y: 4.8, z: -22.5, tint: [0.2, 0.5, 1.0] },
         { m: 'flag', x: -8, y: 4.8, z: 22.5, tint: [1.0, 0.25, 0.3] },
         { m: 'flag', x: 8, y: 4.8, z: 22.5, tint: [1.0, 0.25, 0.3] },
-        // Explosive-style hazard barrels near mid crates (resting on central plaza top y=0.09)
+        // Shootable explosive hazard barrels near mid crates (resting on central plaza top y=0.09)
         { m: 'barrel', x: -10.2, y: 0.09, z: -12.2 },
+        { m: 'barrel', x: -11.4, y: 0.09, z: -12.2 },
         { m: 'barrel', x: 10.2, y: 0.09, z: 12.2 },
+        { m: 'barrel', x: 11.4, y: 0.09, z: 12.2 },
+        { m: 'barrel', x: -10.2, y: 0.09, z: 12.2 },
+        { m: 'barrel', x: 10.2, y: 0.09, z: -12.2 },
         // Courtyard benches
         { m: 'bench', x: -20, y: 0, z: -30.5 },
         { m: 'bench', x: 20, y: 0, z: 30.5, ry: Math.PI },
@@ -709,6 +745,13 @@
         { m: 'crystal', x: 27.5, y: 0, z: -27.5, tint: [0.1, 0.85, 1.0] },
         { m: 'crystal', x: -27.5, y: 0, z: 27.5, tint: [1.0, 0.25, 0.6] },
         { m: 'crystal', x: 27.5, y: 0, z: 27.5, tint: [1.0, 0.25, 0.6] },
+        // Shootable explosive hazard barrels (including chain-reaction flank pairs!)
+        { m: 'barrel', x: -6.2, y: 0, z: -9 },
+        { m: 'barrel', x: 6.2, y: 0, z: 9 },
+        { m: 'barrel', x: -15.5, y: 0, z: -1.8 },
+        { m: 'barrel', x: -15.5, y: 0, z: 1.8 },
+        { m: 'barrel', x: 15.5, y: 0, z: -1.8 },
+        { m: 'barrel', x: 15.5, y: 0, z: 1.8 },
       ],
       jumpPads: [
         { x: -24, y: 0.15, z: -17, r: 1.5, boostY: 15.0, boostX: 0, boostZ: 4.0 },
@@ -829,6 +872,11 @@
         { m: 'pine', x: -9, y: 0, z: -33 },
         { m: 'pine', x: 9, y: 0, z: 33 },
         { m: 'pine', x: -9, y: 0, z: 33 },
+        // Shootable explosive hazard barrels on Skyblox platforms
+        { m: 'barrel', x: -7.5, y: 0, z: -3.2 },
+        { m: 'barrel', x: 7.5, y: 0, z: 3.2 },
+        { m: 'barrel', x: -20.5, y: 1.0, z: -3.2 },
+        { m: 'barrel', x: 20.5, y: 1.0, z: 3.2 },
         // Decorative rocky island undersides (no collider)
         { m: 'rock', x: 0, y: -6.5, z: 0, s: 2.2 },
         { m: 'rock', x: 0, y: -4.5, z: -27, s: 1.6 },

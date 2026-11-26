@@ -225,6 +225,24 @@
         this._tone('sine', n, n * 1.02, 0.15, 0.24, 0.001, idx * 0.055);
       });
     }
+
+    playSlide() {
+      if (!this.ctx) return;
+      this._noise(0.24, 'bandpass', 950, 0.9, 0.22, 0.01);
+      this._tone('sine', 190, 75, 0.18, 0.16);
+    }
+
+    playGrenadeThrow() {
+      if (!this.ctx) return;
+      this._tone('triangle', 980, 1420, 0.04, 0.14); // pin clink
+      this._noise(0.11, 'highpass', 1600, 1.2, 0.2); // throw whoosh
+    }
+
+    playGrenadeBounce(distScale = 1.0) {
+      if (!this.ctx || distScale <= 0.05) return;
+      const s = Math.min(1, distScale);
+      this._tone('triangle', 1240, 780, 0.05, 0.14 * s);
+    }
   }
 
   BS.SoundEngine = SoundEngine;

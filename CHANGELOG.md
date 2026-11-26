@@ -2,6 +2,17 @@
 
 All major updates to **BLOX STRIKE** are committed and tagged in Git.
 
+## v1.2.0 — Movement & Combat Juice (Crouch-Slide, Frag Grenades, Explosive Barrels & Mechanical Gun FX)
+- **Crouch-Slide `[C]` & Slide-Hopping** (`js/config.js`, `js/sim.js`, `js/renderer.js`, `js/client.js`, `js/audio.js`):
+  - Hold **`[C]`** (or **`[Ctrl]`**) while moving (or landing from a jump/pad!) to initiate a momentum-boosting **Power Slide** with 1st-person Dutch-angle camera roll, FOV kick, inward tactical weapon tilt, sliding boot sparks, and full 3D avatar slide poses.
+  - Press **`[Space]`** mid-slide to chain into a momentum-preserving **Slide-Hop**, or hold `[C]` while stationary for a low-profile **Tactical Crouch** (lowered hitbox + 35% tighter hipfire spread + ceiling headroom check before standing).
+- **Tactical Frag Blox Grenades `[G]`** (`js/config.js`, `js/models.js`, `js/sim.js`, `js/renderer.js`, `js/client.js`, `index.html`, `styles.css`):
+  - Press **`[G]`** anytime off cooldown (`7s`, live HUD bar) to throw a tumbling 3D Frag Blox Grenade with realistic gravity, 3-axis wall/floor bouncing, metallic bounce clinks, direct enemy impact detonation, red fuse spark trails, nearby danger `!` warning indicators, and bot AI usage.
+- **Shootable & Chain-Reacting Explosive Barrels** (`js/config.js`, `js/sim.js`, `js/renderer.js`, `js/client.js`):
+  - All red hazard barrels across **Crossroads Arena**, **Neon Paintball** (including twin flank chain-reaction pairs!), and **Skyblox Islands** are now dynamically shootable, flash/shake when damaged or fusing, chain-detonate nearby barrels, award full kill/XP/bounty credit (`[BARREL]`), leave scorched blast marks, and safely respawn after `14s`.
+- **Animated Mechanical Gun Parts, 3D Ejected Shell Casings & Trails** (`js/models.js`, `js/renderer.js`, `js/client.js`):
+  - Added reciprocating bolts & charging handles on `BLOX-AR`, `HYPER-SMG`, and `RAIL-BLOX`, a sliding shotgun pump tracked in real time by your 1st-person left hand on `STUD-12`, pulsing rail coils, disappearing RPG warheads while empty/reloading, physical bouncing 3D brass/buckshot/rail shell casings, and continuous blocky rocket exhaust smoke trails.
+
 ## v1.1.0 — CS2 Weapon Finishes, XP Levels & Bounties, Clean Sights, Security & Zero-Jitter Responsiveness
 - **Match XP Leveling & Killstreak Bounties (`LVL 1`–`25`)** (`js/config.js`, `js/sim.js`, `js/client.js`, `js/renderer.js`, `index.html`, `styles.css`):
   - Both human players and AI bots earn XP from eliminations (`+60 XP`), headshots (`+25 XP`), KOTH zone control (`+8 XP/s`), and **Bounty Shutdowns** (`+90` to `+350 XP`).

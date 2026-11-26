@@ -95,6 +95,7 @@
       this.playerMap = Object.create(null);
       this.projectiles = [];
       this.pickups = [];
+      this.barrels = [];
       this.blocks = [];
       this.localPlayerId = 'p_local';
       this.scores = { blue: 0, red: 0 };
@@ -136,7 +137,9 @@
         maxZ: b.z + b.d * 0.5,
       }));
 
-      // Add solid world-prop colliders into sim blocks (renderer draws full visuals separately)
+      // Add solid world-prop colliders into sim blocks (and register shootable explosive barrels!)
+      this.barrels = [];
+      const barrelMaxHp = (BS.BARREL && BS.BARREL.MAX_HP) || 45;
       const mapProps = this.map.props || [];
       const propColliders = BS.PROP_COLLIDERS || {};
       for (let i = 0; i < mapProps.length; i++) {
@@ -148,7 +151,7 @@
         const w = (rot90 ? col.d : col.w) * s;
         const h = col.h * s;
         const d = (rot90 ? col.w : col.d) * s;
-        this.blocks.push({
+        const blockObj = {
           x: pr.x,
           y: pr.y + h * 0.5,
           z: pr.z,
@@ -161,7 +164,28 @@
           maxY: pr.y + h,
           minZ: pr.z - d * 0.5,
           maxZ: pr.z + d * 0.5,
-        });
+          disabled: false,
+        };
+        if (pr.m === 'barrel') {
+          const brlIdx = this.barrels.length;
+          blockObj.barrelIndex = brlIdx;
+          this.barrels.push({
+            id: 'brl_' + brlIdx,
+            x: pr.x,
+            y: pr.y,
+            z: pr.z,
+            s,
+            hp: barrelMaxHp,
+            maxHp: barrelMaxHp,
+            alive: true,
+            respawnTimer: 0,
+            fuseTimer: 0,
+            fuseOwnerId: null,
+            hurtFlash: 0,
+            block: blockObj,
+          });
+        }
+        this.blocks.push(blockObj);
       }
 
       this.pickups = this.map.pickups.map((p) => ({
@@ -283,6 +307,13 @@
         dashCooldown: 0,
         dashDirX: 0,
         dashDirZ: 0,
+        crouching: false,
+        sliding: false,
+        slideTimer: 0,
+        slideCooldown: 0,
+        crouchBlend: 0,
+        prevCrouch: false,
+        grenadeCooldown: 0,
         speedBoostTimer: 0,
         walkPhase: 0,
         walkAmp: 0,
@@ -311,6 +342,8 @@
           pitch: 0,
           jump: false,
           dash: false,
+          crouch: false,
+          grenade: false,
           fire: false,
           ads: false,
           reload: false,
@@ -395,6 +428,8 @@
       }
       p.input.jump = !!cmd.jump;
       if (cmd.dash) p.input.dash = true;
+      p.input.crouch = !!cmd.crouch;
+      if (cmd.grenade) p.input.grenade = true;
       p.input.fire = !!cmd.fire;
       p.input.ads = !!cmd.ads;
       if (cmd.reload) p.input.reload = true;
@@ -457,6 +492,13 @@
       p.fireCooldown = 0.15;
       p.dashTimer = 0;
       p.dashCooldown = 0;
+      p.crouching = false;
+      p.sliding = false;
+      p.slideTimer = 0;
+      p.slideCooldown = 0;
+      p.crouchBlend = 0;
+      p.prevCrouch = false;
+      p.grenadeCooldown = 0;
       p.speedBoostTimer = 0;
       p.hurtFlash = 0;
       p.grounded = false;
@@ -501,7 +543,7 @@
         return this.events;
       }
 
-      // Update pickups respawn
+      // Update pickups respawn & explosive hazard barrels
       for (let i = 0; i < this.pickups.length; i++) {
         const pk = this.pickups[i];
         if (!pk.active) {
@@ -511,6 +553,7 @@
           }
         }
       }
+      this._updateBarrels(dt);
 
       // Update bots & all players
       for (let i = 0; i < this.players.length; i++) {
@@ -529,6 +572,8 @@
         if (p.hurtFlash > 0) p.hurtFlash = Math.max(0, p.hurtFlash - dt * 3.5);
         if (p.recoilKick > 0) p.recoilKick = Math.max(0, p.recoilKick - dt * 4.5);
         if (p.dashCooldown > 0) p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+        if (p.slideCooldown > 0) p.slideCooldown = Math.max(0, p.slideCooldown - dt);
+        if (p.grenadeCooldown > 0) p.grenadeCooldown = Math.max(0, p.grenadeCooldown - dt);
         if (p.speedBoostTimer > 0) p.speedBoostTimer = Math.max(0, p.speedBoostTimer - dt);
         if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
 
@@ -540,6 +585,7 @@
         p.input.dash = false;
         this._updatePlayerCombat(p, dt);
         p.input.reload = false;
+        p.input.grenade = false;
         this._checkJumpPads(p);
         this._checkPickups(p);
 
@@ -582,6 +628,7 @@
       if (inp.dash && p.dashCooldown <= 0 && p.dashTimer <= 0) {
         p.dashTimer = BS.PLAYER.DASH_DURATION;
         p.dashCooldown = BS.PLAYER.DASH_COOLDOWN;
+        p.sliding = false;
         if (wishLen > 0.1) {
           p.dashDirX = wishX;
           p.dashDirZ = wishZ;
@@ -593,10 +640,31 @@
         this.events.push({ type: 'dash', playerId: p.id, x: p.x, y: p.y + 0.8, z: p.z });
       }
 
+      // Crouch & Power Slide ([C]) initiation (supports sprint-slides AND landing-slides!)
+      const preHoriz = Math.hypot(p.vx, p.vz);
+      const slideTrigger = inp.crouch && (!p.prevCrouch || !p.wasGrounded);
+      if (slideTrigger && p.grounded && !p.sliding && p.slideCooldown <= 0 && p.dashTimer <= 0 && preHoriz > 4.0) {
+        p.sliding = true;
+        p.crouching = true;
+        p.slideTimer = BS.PLAYER.SLIDE_DURATION || 0.65;
+        p.slideCooldown = BS.PLAYER.SLIDE_COOLDOWN || 0.85;
+        const dirLen = preHoriz || 1;
+        const sdx = wishLen > 0.2 ? (p.vx / dirLen * 0.65 + wishX * 0.35) : p.vx / dirLen;
+        const sdz = wishLen > 0.2 ? (p.vz / dirLen * 0.65 + wishZ * 0.35) : p.vz / dirLen;
+        const norm = Math.hypot(sdx, sdz) || 1;
+        const baseSlide = (BS.PLAYER.SLIDE_SPEED || 14.4) * (p.speedBoostTimer > 0 ? 1.22 : 1.0);
+        const boostSpd = Math.min(20.5, Math.max(preHoriz * 1.08, baseSlide));
+        p.vx = (sdx / norm) * boostSpd;
+        p.vz = (sdz / norm) * boostSpd;
+        this.events.push({ type: 'slide', playerId: p.id, x: p.x, y: p.y + 0.1, z: p.z });
+      }
+      p.prevCrouch = !!inp.crouch;
+
       let speed = BS.PLAYER.MOVE_SPEED;
       const lvlTiers = Math.min(9, Math.max(0, (p.level || 1) - 1));
       if (lvlTiers > 0) speed *= 1 + lvlTiers * 0.014;
       if (inp.ads) speed *= BS.PLAYER.ADS_SPEED_MULT;
+      if (p.crouching && !p.sliding) speed *= BS.PLAYER.CROUCH_SPEED_MULT || 0.6;
       if (p.weaponId === 'blade') speed *= 1.15;
       if (p.speedBoostTimer > 0) speed *= 1.38;
 
@@ -605,6 +673,14 @@
         p.dashTimer -= dt;
         p.vx = p.dashDirX * BS.PLAYER.DASH_SPEED;
         p.vz = p.dashDirZ * BS.PLAYER.DASH_SPEED;
+      } else if (p.sliding) {
+        p.slideTimer -= dt;
+        const sf = Math.exp(-(BS.PLAYER.SLIDE_FRICTION || 2.4) * dt);
+        p.vx = p.vx * sf + wishX * 3.8 * dt;
+        p.vz = p.vz * sf + wishZ * 3.8 * dt;
+        if (!inp.crouch || p.slideTimer <= 0 || !p.grounded || Math.hypot(p.vx, p.vz) < (BS.PLAYER.SLIDE_MIN_SPEED || 4.5)) {
+          p.sliding = false;
+        }
       } else if (p.grounded) {
         const rate = hasInput ? BS.PLAYER.GROUND_ACCEL : BS.PLAYER.GROUND_FRICTION;
         const k = 1 - Math.exp(-rate * dt);
@@ -628,7 +704,17 @@
         p.vz *= drag;
       }
 
-      // Coyote time + Jump buffer
+      // Maintain crouch state (only stand up if ceiling has full standing headroom!)
+      if (inp.crouch || p.sliding) {
+        p.crouching = true;
+      } else if (p.crouching) {
+        if (this._hasHeadroom(p.x, p.y, p.z, BS.PLAYER.RADIUS, BS.PLAYER.HEIGHT)) {
+          p.crouching = false;
+        }
+      }
+      p.crouchBlend += ((p.crouching ? 1 : 0) - p.crouchBlend) * (1 - Math.exp(-18 * dt));
+
+      // Coyote time + Jump buffer (with Slide-Hop momentum boost!)
       if (p.grounded) p.coyote = BS.PLAYER.COYOTE_TIME;
       else p.coyote = Math.max(0, p.coyote - dt);
 
@@ -637,6 +723,15 @@
 
       let jumpedThisTick = false;
       if (p.jumpBuffer > 0 && (p.grounded || p.coyote > 0)) {
+        if (p.sliding) {
+          p.sliding = false;
+          const sp = Math.hypot(p.vx, p.vz);
+          if (sp > 1.0) {
+            const boosted = Math.min(16.8, sp + (BS.PLAYER.SLIDE_HOP_BOOST || 1.25));
+            p.vx = (p.vx / sp) * boosted;
+            p.vz = (p.vz / sp) * boosted;
+          }
+        }
         p.vy = BS.PLAYER.JUMP_VEL;
         p.grounded = false;
         p.coyote = 0;
@@ -649,7 +744,8 @@
       if (p.vy < -42) p.vy = -42;
 
       // Move & collide Y -> X -> Z
-      this._moveAndCollide(p, dt);
+      const curHeight = p.crouching ? BS.PLAYER.CROUCH_HEIGHT || 1.22 : BS.PLAYER.HEIGHT;
+      this._moveAndCollide(p, dt, curHeight);
 
       // Ground snap when walking down steps/ledges
       if (p.wasGrounded && !p.grounded && !jumpedThisTick && p.vy <= 0 && p.dashTimer <= 0) {
@@ -657,13 +753,14 @@
         let bestTop = -Infinity;
         for (let i = 0; i < this.blocks.length; i++) {
           const b = this.blocks[i];
+          if (b.disabled) continue;
           if (p.x + R <= b.minX || p.x - R >= b.maxX) continue;
           if (p.z + R <= b.minZ || p.z - R >= b.maxZ) continue;
           if (b.maxY <= p.y + 0.01 && b.maxY >= p.y - BS.PLAYER.STEP_DOWN) {
             if (b.maxY > bestTop) bestTop = b.maxY;
           }
         }
-        if (bestTop > -Infinity && this._hasHeadroom(p.x, bestTop, p.z, R, BS.PLAYER.HEIGHT)) {
+        if (bestTop > -Infinity && this._hasHeadroom(p.x, bestTop, p.z, R, curHeight)) {
           p.y = bestTop;
           p.vy = 0;
           p.grounded = true;
@@ -671,12 +768,12 @@
       }
       p.wasGrounded = p.grounded;
 
-      // Walk animation phase (monotonic phase, exponential walkAmp so stopping never jitters at any FPS!)
+      // Walk animation phase (paused cleanly during a power slide!)
       const horizSpeed = Math.hypot(p.vx, p.vz);
-      if (p.grounded && horizSpeed > 0.8) {
+      if (p.grounded && !p.sliding && horizSpeed > 0.8) {
         p.walkAmp += (1 - p.walkAmp) * (1 - Math.exp(-10 * dt));
       } else {
-        p.walkAmp += (0 - p.walkAmp) * (1 - Math.exp(-8 * dt));
+        p.walkAmp += (0 - p.walkAmp) * (1 - Math.exp(-10 * dt));
       }
       if (p.walkAmp > 0.01) {
         p.walkPhase += dt * horizSpeed * 1.45;
@@ -684,9 +781,9 @@
       }
     }
 
-    _moveAndCollide(p, dt) {
+    _moveAndCollide(p, dt, customHeight) {
       const R = BS.PLAYER.RADIUS;
-      const H = BS.PLAYER.HEIGHT;
+      const H = customHeight || BS.PLAYER.HEIGHT;
       const STEP = BS.PLAYER.STEP_HEIGHT;
 
       // 1. Vertical axis
@@ -694,6 +791,7 @@
       p.grounded = false;
       for (let i = 0; i < this.blocks.length; i++) {
         const b = this.blocks[i];
+        if (b.disabled) continue;
         if (p.x + R <= b.minX || p.x - R >= b.maxX) continue;
         if (p.z + R <= b.minZ || p.z - R >= b.maxZ) continue;
         if (p.y < b.maxY && p.y + H > b.minY) {
@@ -713,6 +811,7 @@
       p.x += p.vx * dt;
       for (let i = 0; i < this.blocks.length; i++) {
         const b = this.blocks[i];
+        if (b.disabled) continue;
         if (p.x + R <= b.minX || p.x - R >= b.maxX) continue;
         if (p.z + R <= b.minZ || p.z - R >= b.maxZ) continue;
         if (p.y >= b.maxY - 0.01 || p.y + H <= b.minY + 0.01) continue;
@@ -733,6 +832,7 @@
       p.z += p.vz * dt;
       for (let i = 0; i < this.blocks.length; i++) {
         const b = this.blocks[i];
+        if (b.disabled) continue;
         if (p.x + R <= b.minX || p.x - R >= b.maxX) continue;
         if (p.z + R <= b.minZ || p.z - R >= b.maxZ) continue;
         if (p.y >= b.maxY - 0.01 || p.y + H <= b.minY + 0.01) continue;
@@ -752,6 +852,7 @@
     _hasHeadroom(x, y, z, R, H) {
       for (let i = 0; i < this.blocks.length; i++) {
         const b = this.blocks[i];
+        if (b.disabled) continue;
         if (x + R <= b.minX || x - R >= b.maxX) continue;
         if (z + R <= b.minZ || z - R >= b.maxZ) continue;
         if (y + 0.02 < b.maxY && y + H > b.minY) return false;
@@ -802,6 +903,11 @@
         this.events.push({ type: 'reload', playerId: p.id, weaponId: w.id });
       }
 
+      // Tactical Frag Blox Grenade ([G]) — usable anytime off cooldown without interrupting weapon state!
+      if (inp.grenade && p.grenadeCooldown <= 0) {
+        this._throwGrenade(p);
+      }
+
       // Firing
       const wantsFire = w.fireMode === 'auto' ? inp.fire : inp.fire && !p.prevFire;
       p.prevFire = inp.fire;
@@ -811,6 +917,53 @@
           this._fireWeapon(p, w);
         }
       }
+    }
+
+    _getEyeHeight(p) {
+      const crouchEye = BS.PLAYER.CROUCH_EYE_HEIGHT || 0.96;
+      return BS.PLAYER.EYE_HEIGHT + (crouchEye - BS.PLAYER.EYE_HEIGHT) * (p.crouchBlend || 0);
+    }
+
+    _throwGrenade(p) {
+      const gCfg = BS.GRENADE || {};
+      p.grenadeCooldown = gCfg.COOLDOWN || 7.0;
+      p.spawnProtect = 0;
+
+      const ox = p.x;
+      const oy = p.y + this._getEyeHeight(p) - 0.08;
+      const oz = p.z;
+      const cp = Math.cos(p.pitch);
+      const sp = Math.sin(p.pitch);
+      const sy = Math.sin(p.yaw);
+      const cy = Math.cos(p.yaw);
+      const dx = sy * cp;
+      const dy = sp;
+      const dz = -cy * cp;
+
+      if (this.projectiles.length < 48) {
+        const throwSpd = gCfg.THROW_SPEED || 21.5;
+        const upVel = gCfg.UP_VEL || 4.2;
+        this.projectiles.push({
+          id: this.nextProjId++,
+          kind: 'grenade',
+          ownerId: p.id,
+          weaponId: 'grenade',
+          x: ox + dx * 0.65,
+          y: oy + dy * 0.65,
+          z: oz + dz * 0.65,
+          vx: dx * throwSpd + p.vx * 0.25,
+          vy: dy * throwSpd + upVel,
+          vz: dz * throwSpd + p.vz * 0.25,
+          gravity: gCfg.GRAVITY || 22.0,
+          bounce: gCfg.BOUNCE || 0.52,
+          life: gCfg.FUSE || 1.55,
+          splashRadius: gCfg.SPLASH_RADIUS || 6.2,
+          damage: gCfg.DAMAGE || 95,
+          knockback: gCfg.KNOCKBACK || 15.5,
+          selfDmgMult: gCfg.SELF_DMG_MULT || 0.3,
+        });
+      }
+      this.events.push({ type: 'grenadeThrow', playerId: p.id, x: ox, y: oy, z: oz });
     }
 
     _fireWeapon(p, w) {
@@ -823,7 +976,7 @@
       }
 
       const ox = p.x;
-      const oy = p.y + BS.PLAYER.EYE_HEIGHT;
+      const oy = p.y + this._getEyeHeight(p);
       const oz = p.z;
 
       const cp = Math.cos(p.pitch);
@@ -890,6 +1043,7 @@
         if (this.projectiles.length < 48) {
           const proj = {
             id: this.nextProjId++,
+            kind: 'rocket',
             ownerId: p.id,
             weaponId: w.id,
             x: ox + baseDx * 0.75,
@@ -902,6 +1056,7 @@
             splashRadius: w.splashRadius,
             damage: w.damage,
             knockback: w.knockback,
+            selfDmgMult: 0.35,
           };
           this.projectiles.push(proj);
         }
@@ -917,10 +1072,12 @@
         return;
       }
 
-      // Hitscan weapon (AR, SMG, Shotgun, Railgun Sniper)
-      const spread = p.input.ads ? w.adsSpread : w.spread;
+      // Hitscan weapon (AR, SMG, Shotgun, Railgun Sniper) — crouching tightens hipfire spread by 35%!
+      const crouchMult = p.crouching && !p.input.ads ? 0.65 : 1.0;
+      const spread = (p.input.ads ? w.adsSpread : w.spread) * crouchMult;
       const hits = [];
       const dmgAccum = Object.create(null);
+      const barrelDmgAccum = Object.create(null);
 
       for (let k = 0; k < w.pellets; k++) {
         const rx = (Math.random() - 0.5) * 2 * spread;
@@ -940,6 +1097,7 @@
           y: res.y,
           z: res.z,
           hitPlayer: !!res.player,
+          hitBarrel: res.barrelIndex !== null,
           headshot: res.headshot,
         });
 
@@ -958,12 +1116,18 @@
           const pelletDmg = Math.round(w.damage * (res.headshot ? w.headMult : 1));
           dmgAccum[key].damage += pelletDmg;
           if (res.headshot) dmgAccum[key].headshot = true;
+        } else if (res.barrelIndex !== null) {
+          barrelDmgAccum[res.barrelIndex] = (barrelDmgAccum[res.barrelIndex] || 0) + w.damage;
         }
       }
 
       Object.keys(dmgAccum).forEach((id) => {
         const d = dmgAccum[id];
         this._applyDamage(p, d.player, d.damage, w.id, d.headshot, d.x, d.y, d.z);
+      });
+      Object.keys(barrelDmgAccum).forEach((bIdx) => {
+        const brl = this.barrels[Number(bIdx)];
+        if (brl && brl.alive) this._damageBarrel(brl, barrelDmgAccum[bIdx], p.id);
       });
 
       this.events.push({
@@ -973,6 +1137,8 @@
         ox,
         oy,
         oz,
+        yaw: p.yaw,
+        pitch: p.pitch,
         hits,
       });
     }
@@ -980,15 +1146,18 @@
     raycastBlocks(ox, oy, oz, dx, dy, dz, maxDist) {
       let best = maxDist;
       let hit = false;
+      let hitBlock = null;
       for (let i = 0; i < this.blocks.length; i++) {
         const b = this.blocks[i];
+        if (b.disabled) continue;
         const t = rayAABB(ox, oy, oz, dx, dy, dz, b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ, best);
         if (t >= 0 && t < best) {
           best = t;
           hit = true;
+          hitBlock = b;
         }
       }
-      return { dist: best, hit };
+      return { dist: best, hit, block: hitBlock };
     }
 
     raycastWorldAndPlayers(ox, oy, oz, dx, dy, dz, maxDist, shooter) {
@@ -996,12 +1165,18 @@
       let bestDist = worldHit.dist;
       let hitPlayer = null;
       let headshot = false;
+      let barrelIndex =
+        worldHit.hit && worldHit.block && worldHit.block.barrelIndex !== undefined
+          ? worldHit.block.barrelIndex
+          : null;
 
       for (let i = 0; i < this.players.length; i++) {
         const other = this.players[i];
         if (!other.alive || !this._isEnemy(shooter, other)) continue;
+        const pHeight = other.crouching ? BS.PLAYER.CROUCH_HEIGHT || 1.22 : BS.PLAYER.HEIGHT;
+        const pHeadMin = other.crouching ? BS.PLAYER.CROUCH_HEAD_MIN_Y || 0.78 : BS.PLAYER.HEAD_MIN_Y;
 
-        // Check head hitbox first (slightly generous for crispy Roblox feel)
+        // Check head hitbox first (adapts dynamically when target is crouching/sliding!)
         const ht = rayAABB(
           ox,
           oy,
@@ -1010,10 +1185,10 @@
           dy,
           dz,
           other.x - 0.34,
-          other.y + BS.PLAYER.HEAD_MIN_Y,
+          other.y + pHeadMin,
           other.z - 0.34,
           other.x + 0.34,
-          other.y + BS.PLAYER.HEIGHT + 0.08,
+          other.y + pHeight + 0.08,
           other.z + 0.34,
           bestDist
         );
@@ -1021,6 +1196,7 @@
           bestDist = ht;
           hitPlayer = other;
           headshot = true;
+          barrelIndex = null;
           continue;
         }
 
@@ -1036,7 +1212,7 @@
           other.y,
           other.z - 0.48,
           other.x + 0.48,
-          other.y + BS.PLAYER.HEAD_MIN_Y + 0.06,
+          other.y + pHeadMin + 0.06,
           other.z + 0.48,
           bestDist
         );
@@ -1044,6 +1220,7 @@
           bestDist = bt;
           hitPlayer = other;
           headshot = false;
+          barrelIndex = null;
         }
       }
 
@@ -1053,21 +1230,176 @@
         y: oy + dy * bestDist,
         z: oz + dz * bestDist,
         player: hitPlayer,
+        barrelIndex,
         headshot,
       };
+    }
+
+    _updateBarrels(dt) {
+      for (let i = 0; i < this.barrels.length; i++) {
+        const brl = this.barrels[i];
+        if (brl.hurtFlash > 0) brl.hurtFlash = Math.max(0, brl.hurtFlash - dt * 4.5);
+        if (brl.alive) {
+          if (brl.fuseTimer > 0) {
+            brl.fuseTimer -= dt;
+            brl.hurtFlash = 1.0;
+            if (brl.fuseTimer <= 0) {
+              this._detonateBarrel(brl, brl.fuseOwnerId);
+            }
+          }
+        } else {
+          brl.respawnTimer -= dt;
+          if (brl.respawnTimer <= 0) {
+            // Ensure no alive player is standing inside the barrel spawn footprint
+            let clear = true;
+            for (let j = 0; j < this.players.length; j++) {
+              const p = this.players[j];
+              if (p.alive && Math.hypot(p.x - brl.x, p.z - brl.z) < 1.15 && Math.abs(p.y - brl.y) < 2.0) {
+                clear = false;
+                break;
+              }
+            }
+            if (clear) {
+              brl.alive = true;
+              brl.hp = brl.maxHp;
+              brl.hurtFlash = 0;
+              brl.fuseTimer = 0;
+              brl.block.disabled = false;
+            } else {
+              brl.respawnTimer = 0.75;
+            }
+          }
+        }
+      }
+    }
+
+    _damageBarrel(brl, dmg, attackerId) {
+      if (!brl || !brl.alive) return;
+      brl.hp -= dmg;
+      brl.hurtFlash = 1.0;
+      if (brl.hp <= 0) {
+        this._detonateBarrel(brl, attackerId);
+      }
+    }
+
+    _detonateBarrel(brl, attackerId) {
+      if (!brl || !brl.alive) return;
+      brl.alive = false;
+      brl.fuseTimer = 0;
+      brl.respawnTimer = (BS.BARREL && BS.BARREL.RESPAWN_TIME) || 14.0;
+      brl.block.disabled = true;
+      const bCfg = BS.BARREL || {};
+      this.events.push({
+        type: 'barrelExplode',
+        id: brl.id,
+        x: brl.x,
+        y: brl.y + 0.65,
+        z: brl.z,
+        attackerId: attackerId || null,
+      });
+      this._explode(brl.x, brl.y + 0.65, brl.z, {
+        ownerId: attackerId || null,
+        weaponId: 'barrel',
+        splashRadius: bCfg.SPLASH_RADIUS || 6.8,
+        damage: bCfg.DAMAGE || 115,
+        knockback: bCfg.KNOCKBACK || 18.0,
+        selfDmgMult: 0.35,
+      });
     }
 
     _updateProjectiles(dt) {
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const pr = this.projectiles[i];
         pr.life -= dt;
+        const owner = this.playerMap[pr.ownerId];
+
+        if (pr.kind === 'grenade') {
+          pr.vy -= (pr.gravity || 22.0) * dt;
+          // Direct enemy impact check -> instant detonation!
+          let directHit = false;
+          for (let j = 0; j < this.players.length; j++) {
+            const pl = this.players[j];
+            if (!pl.alive || pl.id === pr.ownerId) continue;
+            if (owner && !this._isEnemy(owner, pl)) continue;
+            if (Math.hypot(pl.x - pr.x, pl.y + 0.95 - pr.y, pl.z - pr.z) < 0.85) {
+              directHit = true;
+              break;
+            }
+          }
+          if (directHit || pr.life <= 0 || pr.y < this.map.voidY) {
+            if (pr.y >= this.map.voidY) this._explode(pr.x, pr.y, pr.z, pr);
+            this.projectiles.splice(i, 1);
+            continue;
+          }
+
+          // Bouncy 3-axis AABB physics against world blocks & barrels
+          const R = 0.16;
+          const bnc = pr.bounce || 0.52;
+          let bounced = false;
+          let impactSpd = 0;
+
+          const oldY = pr.y;
+          pr.y += pr.vy * dt;
+          for (let k = 0; k < this.blocks.length; k++) {
+            const b = this.blocks[k];
+            if (b.disabled) continue;
+            if (pr.x + R <= b.minX || pr.x - R >= b.maxX || pr.z + R <= b.minZ || pr.z - R >= b.maxZ) continue;
+            if (pr.y - R < b.maxY && pr.y + R > b.minY) {
+              impactSpd = Math.max(impactSpd, Math.abs(pr.vy));
+              if (oldY >= b.maxY) {
+                pr.y = b.maxY + R;
+                pr.vy = Math.abs(pr.vy) * bnc;
+                if (pr.vy < 1.1) pr.vy = 0;
+                pr.vx *= 0.84;
+                pr.vz *= 0.84;
+              } else {
+                pr.y = b.minY - R;
+                pr.vy = -Math.abs(pr.vy) * bnc;
+              }
+              bounced = true;
+            }
+          }
+
+          const oldX = pr.x;
+          pr.x += pr.vx * dt;
+          for (let k = 0; k < this.blocks.length; k++) {
+            const b = this.blocks[k];
+            if (b.disabled) continue;
+            if (pr.y - R >= b.maxY || pr.y + R <= b.minY || pr.z + R <= b.minZ || pr.z - R >= b.maxZ) continue;
+            if (pr.x + R > b.minX && pr.x - R < b.maxX) {
+              impactSpd = Math.max(impactSpd, Math.abs(pr.vx));
+              pr.x = oldX < b.minX ? b.minX - R : b.maxX + R;
+              pr.vx = -pr.vx * bnc;
+              bounced = true;
+            }
+          }
+
+          const oldZ = pr.z;
+          pr.z += pr.vz * dt;
+          for (let k = 0; k < this.blocks.length; k++) {
+            const b = this.blocks[k];
+            if (b.disabled) continue;
+            if (pr.y - R >= b.maxY || pr.y + R <= b.minY || pr.x + R <= b.minX || pr.x - R >= b.maxX) continue;
+            if (pr.z + R > b.minZ && pr.z - R < b.maxZ) {
+              impactSpd = Math.max(impactSpd, Math.abs(pr.vz));
+              pr.z = oldZ < b.minZ ? b.minZ - R : b.maxZ + R;
+              pr.vz = -pr.vz * bnc;
+              bounced = true;
+            }
+          }
+
+          if (bounced && impactSpd > 2.6) {
+            this.events.push({ type: 'grenadeBounce', x: pr.x, y: pr.y, z: pr.z });
+          }
+          continue;
+        }
+
         const speed = Math.hypot(pr.vx, pr.vy, pr.vz);
         const stepDist = speed * dt;
         const dx = pr.vx / (speed || 1);
         const dy = pr.vy / (speed || 1);
         const dz = pr.vz / (speed || 1);
 
-        const owner = this.playerMap[pr.ownerId];
         const hitWorld = this.raycastBlocks(pr.x, pr.y, pr.z, dx, dy, dz, stepDist + 0.25);
 
         let hitSomething = hitWorld.hit || pr.life <= 0;
@@ -1103,7 +1435,7 @@
     }
 
     _explode(ex, ey, ez, pr) {
-      const owner = this.playerMap[pr.ownerId] || null;
+      const owner = pr.ownerId ? this.playerMap[pr.ownerId] || null : null;
       this.events.push({
         type: 'explosion',
         x: ex,
@@ -1111,8 +1443,26 @@
         z: ez,
         radius: pr.splashRadius,
         ownerId: pr.ownerId,
+        weaponId: pr.weaponId,
       });
 
+      // Chain-react any nearby alive explosive hazard barrels!
+      const chainDelay = (BS.BARREL && BS.BARREL.CHAIN_DELAY) || 0.14;
+      for (let b = 0; b < this.barrels.length; b++) {
+        const brl = this.barrels[b];
+        if (!brl.alive) continue;
+        const bd = Math.hypot(brl.x - ex, brl.y + 0.6 - ey, brl.z - ez);
+        if (bd <= pr.splashRadius + 0.5) {
+          if (bd < 1.1) {
+            this._detonateBarrel(brl, pr.ownerId);
+          } else if (brl.fuseTimer <= 0) {
+            brl.fuseOwnerId = pr.ownerId || null;
+            brl.fuseTimer = chainDelay;
+          }
+        }
+      }
+
+      const selfMult = pr.selfDmgMult !== undefined ? pr.selfDmgMult : 0.35;
       for (let i = 0; i < this.players.length; i++) {
         const pl = this.players[i];
         if (!pl.alive) continue;
@@ -1129,11 +1479,11 @@
           const inv = 1 / Math.max(0.2, dist);
           pl.vx += dx * inv * kb;
           pl.vz += dz * inv * kb;
-          pl.vy += Math.max(4.5, dy * inv * kb + 5.0); // Rocket jumping works!!
+          pl.vy += Math.max(4.5, dy * inv * kb + 5.0); // Rocket / Grenade jumping works!!
 
-          const dmg = Math.round(pr.damage * (0.35 + 0.65 * falloff) * (isSelf ? 0.35 : 1.0));
+          const dmg = Math.round(pr.damage * (0.35 + 0.65 * falloff) * (isSelf ? selfMult : 1.0));
           if (dmg > 0) {
-            this._applyDamage(isSelf ? null : owner, pl, dmg, pr.weaponId, false, pl.x, pl.y + 1.0, pl.z);
+            this._applyDamage(isSelf ? null : owner, pl, dmg, pr.weaponId || 'rocket', false, pl.x, pl.y + 1.0, pl.z);
           }
         }
       }
@@ -1502,6 +1852,8 @@
       const inp = bot.input;
       inp.jump = false;
       inp.dash = false;
+      if (!bot.sliding) inp.crouch = false;
+      inp.grenade = false;
       inp.fire = false;
       inp.ads = false;
       inp.reload = false;
@@ -1589,6 +1941,12 @@
         const canTrigger = w.fireMode === 'auto' || (!bot.prevFire && bot.fireCooldown <= 0);
         if (inRange && safeRpg && canTrigger && angleDiff < 0.28 && Math.random() < diffCfg.fireChance) {
           inp.fire = true;
+        }
+        if (targetDist > 7.5 && targetDist < 22 && bot.grenadeCooldown <= 0 && angleDiff < 0.35 && Math.random() < 0.42 * dt) {
+          inp.grenade = true;
+        }
+        if (Math.random() < 0.38 * dt && bot.grounded && Math.hypot(bot.vx, bot.vz) > 4.5 && bot.slideCooldown <= 0) {
+          inp.crouch = true;
         }
         if (Math.random() < 0.48 * dt && bot.grounded) inp.jump = true;
         if (Math.random() < 0.3 * dt && bot.dashCooldown <= 0) inp.dash = true;
@@ -1704,6 +2062,11 @@
             ? 1 - p.reloadTimer / (p.reloadDuration || (BS.WEAPON_BY_ID[p.weaponId] || BS.WEAPONS[0]).reloadTime)
             : 0,
           dashCooldown: p.dashCooldown,
+          crouching: !!p.crouching,
+          sliding: !!p.sliding,
+          crouchBlend: p.crouchBlend || 0,
+          slideCooldown: p.slideCooldown || 0,
+          grenadeCooldown: p.grenadeCooldown || 0,
           speedBoostTimer: p.speedBoostTimer,
           walkPhase: p.walkPhase,
           walkAmp: p.walkAmp,
@@ -1722,12 +2085,24 @@
         })),
         projectiles: this.projectiles.map((pr) => ({
           id: pr.id,
+          kind: pr.kind || 'rocket',
           x: pr.x,
           y: pr.y,
           z: pr.z,
           vx: pr.vx,
           vy: pr.vy,
           vz: pr.vz,
+          life: pr.life,
+        })),
+        barrels: this.barrels.map((brl) => ({
+          id: brl.id,
+          x: brl.x,
+          y: brl.y,
+          z: brl.z,
+          s: brl.s || 1,
+          alive: brl.alive,
+          hurtFlash: brl.hurtFlash || 0,
+          fusing: brl.fuseTimer > 0,
         })),
         pickups: this.pickups.map((pk) => ({
           id: pk.id,

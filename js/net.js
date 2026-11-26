@@ -126,6 +126,8 @@
       pitch: Math.max(-1.48, Math.min(1.48, num(cmd.pitch, 0))),
       jump: !!cmd.jump,
       dash: !!cmd.dash,
+      crouch: !!cmd.crouch,
+      grenade: !!cmd.grenade,
       fire: !!cmd.fire,
       ads: !!cmd.ads,
       reload: !!cmd.reload,
@@ -188,6 +190,8 @@
           const safeOpts = options && typeof options === 'object' ? {
             mapId: typeof options.mapId === 'string' ? options.mapId : 'crossroads',
             modeId: typeof options.modeId === 'string' ? options.modeId : 'tdm',
+            botCount: Number.isFinite(options.botCount) ? options.botCount : 7,
+            difficulty: typeof options.difficulty === 'string' ? options.difficulty : 'medium',
             playerName: typeof options.playerName === 'string' ? options.playerName.slice(0, 16) : 'BloxPlayer',
             skinId: typeof options.skinId === 'string' ? options.skinId : 'classic',
             accessoryId: typeof options.accessoryId === 'string' ? options.accessoryId : 'auto',
@@ -203,7 +207,12 @@
           }
           if (data.type === 'welcome' && typeof data.playerId === 'string' && data.playerId.length <= 48) {
             this.localPlayerId = data.playerId;
-            resolve({ playerId: this.localPlayerId, mode: this.mode });
+            resolve({
+              playerId: this.localPlayerId,
+              mode: this.mode,
+              mapId: typeof data.mapId === 'string' ? data.mapId : 'crossroads',
+              modeId: typeof data.modeId === 'string' ? data.modeId : 'tdm',
+            });
           } else if (
             data.type === 'snapshot' &&
             data.payload &&
@@ -223,14 +232,18 @@
           }
         };
         this.ws.onerror = (err) => reject(err);
+        this.ws.onclose = () => {
+          reject(new Error('LAN server closed the connection.'));
+          if (this.onClose) this.onClose();
+        };
       });
     }
 
-    sendInput(cmd) {
+    sendInput(cmd, force = false) {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const now = Date.now();
       // Client-side rate limit (~65Hz max) to avoid spamming remote server
-      if (now - this.lastSendTime < 15 && !cmd.dash && !cmd.reload && cmd.weaponSlot === null) return;
+      if (!force && now - this.lastSendTime < 15 && !cmd.dash && !cmd.grenade && !cmd.reload && cmd.weaponSlot === null) return;
       const clean = sanitizeOutgoingInput(cmd);
       if (!clean) return;
       this.lastSendTime = now;
@@ -256,6 +269,7 @@
 
     disconnect() {
       if (this.ws) {
+        this.ws.onclose = null; // intentional leave: don't fire onClose
         this.ws.close();
         this.ws = null;
       }

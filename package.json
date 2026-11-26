@@ -1,0 +1,11 @@
+{
+  "name": "blox-strike",
+  "private": true,
+  "description": "Blox Strike LAN multiplayer server",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

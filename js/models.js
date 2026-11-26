@@ -9,6 +9,8 @@
   const weapons = {
     ar: {
       muzzle: [0, 0.1, -0.9],
+      eject: [0.075, 0.12, -0.06],
+      shellColor: [0.96, 0.78, 0.24],
       leftHand: [0, 0.03, -0.48],
       vmHip: [0.33, -0.43, -0.52],
       vmAds: [0, -0.32, -0.44],
@@ -17,6 +19,7 @@
         { p: [0, 0.185, -0.14], s: [0.065, 0.022, 0.44], c: 'dark' }, // low-profile top rail
         { p: [-0.062, 0.1, -0.14], s: [0.01, 0.035, 0.42], c: 'accent', t: 2, e: 0.9 },
         { p: [0.062, 0.1, -0.14], s: [0.01, 0.035, 0.42], c: 'accent', t: 2, e: 0.9 },
+        { p: [0.066, 0.125, -0.06], s: [0.022, 0.028, 0.095], c: 'metal', anim: 'bolt' }, // reciprocating bolt + handle
         { p: [0, 0.09, -0.48], s: [0.11, 0.12, 0.26], c: 'dark' }, // handguard
         { p: [0, 0.1, -0.72], s: [0.045, 0.045, 0.26], c: 'metal' }, // barrel
         { p: [0, 0.1, -0.86], s: [0.065, 0.065, 0.06], c: 'dark' }, // muzzle brake
@@ -32,6 +35,8 @@
 
     shotgun: {
       muzzle: [0, 0.13, -0.82],
+      eject: [0.08, 0.11, -0.08],
+      shellColor: [0.92, 0.2, 0.18],
       leftHand: [0, 0.03, -0.42],
       vmHip: [0.33, -0.42, -0.5],
       vmAds: [0, -0.25, -0.46],
@@ -39,7 +44,8 @@
         { p: [0, 0.09, -0.1], s: [0.13, 0.15, 0.36], c: 'body' }, // receiver
         { p: [0, 0.13, -0.52], s: [0.07, 0.07, 0.56], c: 'metal' }, // heavy barrel
         { p: [0, 0.05, -0.46], s: [0.06, 0.06, 0.48], c: 'dark' }, // under-barrel mag tube
-        { p: [0, 0.05, -0.42], s: [0.1, 0.09, 0.2], c: 'accent', t: 0, e: 0.35 }, // ribbed pump
+        { p: [0, 0.05, -0.42], s: [0.1, 0.09, 0.2], c: 'accent', t: 0, e: 0.35, anim: 'pump' }, // sliding ribbed pump
+        { p: [0.068, 0.11, -0.08], s: [0.014, 0.032, 0.095], c: 'metal', anim: 'pump' }, // pump action bolt carrier
         { p: [0.072, 0.1, -0.04], s: [0.015, 0.045, 0.035], c: [1, 0.25, 0.2] }, // side-saddle shell 1
         { p: [0.072, 0.1, -0.1], s: [0.015, 0.045, 0.035], c: [1, 0.25, 0.2] }, // shell 2
         { p: [0.072, 0.1, -0.16], s: [0.015, 0.045, 0.035], c: [1, 0.25, 0.2] }, // shell 3
@@ -51,6 +57,8 @@
 
     smg: {
       muzzle: [0, 0.09, -0.67],
+      eject: [0.07, 0.11, -0.08],
+      shellColor: [0.96, 0.82, 0.32],
       leftHand: [0, -0.06, -0.34],
       vmHip: [0.31, -0.41, -0.48],
       vmAds: [0, -0.265, -0.42],
@@ -59,6 +67,8 @@
         { p: [0, 0.08, -0.36], s: [0.1, 0.11, 0.14], c: 'dark' }, // shroud
         { p: [0, 0.09, -0.48], s: [0.04, 0.04, 0.12], c: 'metal' }, // barrel
         { p: [0, 0.09, -0.58], s: [0.06, 0.06, 0.16], c: 'dark' }, // suppressor
+        { p: [-0.064, 0.128, -0.2], s: [0.024, 0.02, 0.045], c: 'metal', anim: 'bolt' }, // left charging handle
+        { p: [0.058, 0.11, -0.08], s: [0.012, 0.028, 0.075], c: 'metal', anim: 'bolt' }, // right ejection bolt
         { p: [0, -0.07, -0.14], s: [0.065, 0.22, 0.07], c: 'dark' }, // stick mag
         { p: [0, -0.04, 0.04], r: [-0.25, 0, 0], s: [0.065, 0.14, 0.075], c: 'body' }, // pistol grip
         { p: [0, -0.04, -0.34], s: [0.05, 0.12, 0.05], c: 'dark' }, // vertical foregrip
@@ -74,15 +84,18 @@
 
     sniper: {
       muzzle: [0, 0.1, -1.0],
+      eject: [0.08, 0.11, -0.02],
+      shellColor: [0.68, 0.36, 1.0],
       leftHand: [0, 0.02, -0.35],
       vmHip: [0.34, -0.43, -0.5],
       vmAds: [0.15, -0.33, -0.4],
       parts: [
         { p: [0, 0.08, -0.05], s: [0.12, 0.15, 0.56], c: 'body' }, // chassis
         { p: [0, 0.1, -0.62], s: [0.05, 0.05, 0.62], c: 'dark' }, // rail barrel
-        { p: [0, 0.1, -0.45], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1 }, // coil 1
-        { p: [0, 0.1, -0.6], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1 }, // coil 2
-        { p: [0, 0.1, -0.75], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1 }, // coil 3
+        { p: [0, 0.1, -0.45], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1, anim: 'coil' }, // coil 1
+        { p: [0, 0.1, -0.6], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1, anim: 'coil' }, // coil 2
+        { p: [0, 0.1, -0.75], s: [0.08, 0.08, 0.03], c: 'accent', t: 2, e: 1, anim: 'coil' }, // coil 3
+        { p: [0.074, 0.11, 0.02], s: [0.038, 0.02, 0.022], c: 'metal', anim: 'bolt' }, // railgun bolt handle
         { p: [0, 0.1, -0.95], s: [0.08, 0.06, 0.07], c: 'dark' }, // rail brake
         { p: [0, 0.21, -0.08], s: [0.068, 0.068, 0.34], c: 'dark' }, // sleek scope tube
         { p: [0, 0.21, -0.27], s: [0.09, 0.09, 0.055], c: 'dark' }, // objective bell
@@ -109,7 +122,7 @@
         { p: [0, 0.16, -0.15], s: [0.2, 0.2, 1.0], c: 'body', t: 0 }, // studded launch tube
         { p: [0, 0.16, -0.68], s: [0.24, 0.24, 0.08], c: 'dark' }, // front collar
         { p: [0, 0.16, 0.38], s: [0.26, 0.26, 0.08], c: 'dark' }, // rear exhaust bell
-        { p: [0, 0.16, -0.74], s: [0.12, 0.12, 0.08], c: 'accent', e: 0.6 }, // loaded rocket tip
+        { p: [0, 0.16, -0.74], s: [0.12, 0.12, 0.08], c: 'accent', e: 0.6, anim: 'warhead' }, // loaded rocket tip (hides when empty!)
         { p: [0, 0.16, -0.5], s: [0.21, 0.21, 0.04], c: 'accent', t: 2, e: 0.8 }, // front warning stripe
         { p: [0, 0.16, 0.2], s: [0.21, 0.21, 0.04], c: 'accent', t: 2, e: 0.8 }, // rear stripe
         { p: [0, -0.02, 0], r: [-0.2, 0, 0], s: [0.07, 0.15, 0.08], c: 'dark' }, // grip
@@ -316,10 +329,19 @@
     ],
   };
 
+  // Thrown 3D Frag Blox Grenade model
+  const grenade = [
+    { p: [0, 0, 0], s: [0.24, 0.3, 0.24], c: [0.18, 0.24, 0.19] }, // olive tactical body
+    { p: [0, 0, 0], s: [0.26, 0.06, 0.26], c: [1.0, 0.22, 0.2], t: 2, e: 1.0 }, // glowing red LED fuse band
+    { p: [0, 0.18, 0], s: [0.12, 0.08, 0.12], c: 'metal' }, // fuse neck
+    { p: [0.08, 0.06, 0], r: [0, 0, -0.18], s: [0.04, 0.24, 0.06], c: 'dark' }, // safety spoon lever
+  ];
+
   BS.MODELS = {
     weapons,
     accessories,
     props,
     pickups,
+    grenade,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

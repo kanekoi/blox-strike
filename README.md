@@ -11,7 +11,8 @@ For quick visual testing, append URL parameters such as `index.html?autostart=1`
 - **Custom 3D WebGL2 Block Engine**: Procedural Roblox studs, crates, arena tiles, glossy/metallic plastic lighting, sunlit skybox with drifting blocky clouds, **pre-baked static map + prop VAO batching** (entire arena + scenery rendered in 3–4 draw calls), GL state caching, and blocky avatar shatter physics on KO.
 - **10 CS2-Inspired Weapon Finishes + `[F]` Weapon Inspect**: Factory Stock, **Asiimov**, **Dragon Lore**, **Hyper Beast**, **Printstream**, **Fade**, **Case Hardened (Blue Gem)**, **Redline**, **Doppler Ruby**, and **Doppler Sapphire** — selectable in the lobby with procedural 256×256 patterns, metallic/Fresnel specular shader sheen, rarity badges, and `[F]` inspect animations.
 - **Custom Multi-Part 3D Models (`js/models.js`)**:
-  - **6 Detailed Weapons** (1st-person viewmodels with unobstructed panoramic ADS sights, 2-hand grips, smooth ADS blending, `1/dt`-free critically-damped mouse sway, and world-space held models): `BLOX-AR`, `STUD-12` Shotgun, `HYPER-SMG`, `RAIL-BLOX` Sniper, `BRICK-RPG` Rocket Launcher, and `NEON BLADE`. Switch anytime via `1`–`6`, `Numpad`, `E`/`Q`, mouse wheel, or hotbar clicks; bots dynamically equip and swap across **all 6 weapons** with random CS2 finishes!
+  - **6 Detailed Mechanical Weapons** (1st-person viewmodels with reciprocating bolts/charging handles, left-hand-tracked shotgun pump action, 3D ejected brass/buckshot/rail shell casings, unobstructed panoramic ADS sights, and world-space held models): `BLOX-AR`, `STUD-12` Shotgun, `HYPER-SMG`, `RAIL-BLOX` Sniper, `BRICK-RPG` Rocket Launcher (with smoke trails & empty-tube warhead state), and `NEON BLADE`. Switch anytime via `1`–`6`, `Numpad`, `E`/`Q`, mouse wheel, or hotbar clicks; bots dynamically equip and swap across **all 6 weapons** with random CS2 finishes!
+  - **Movement & Tactical Combat Juice**: Press **`[C]` / `[Ctrl]`** to **Power-Slide** (with camera roll, boot sparks, and momentum-boosting **Slide-Hops**) or **Tactical Crouch** (tighter hipfire + ducking hitbox); press **`[G]`** to lob bouncy **3D Frag Blox Grenades**; shoot red **Hazard Barrels** on all 3 maps for chain-reaction explosions!
   - **Match XP Leveling & Killstreak Bounties**: Players and AI bots alike earn XP from kills, headshots, KOTH objectives, and Bounty Shutdowns — leveling up in real time (`+Max HP`, `+Move Speed`, `+Reload Speed`, instant `+HP/+Shield` surge) while 3+ streak leaders carry golden **Wanted Bounties** visible in 3D, on radar, and on the scoreboard.
   - **9 Avatar Accessories / Hats**: Classic Hair, Cyber Visor, Backwards Cap, Gold Crown, Void Horns, Headphones, Traffic Cone, Dark Dominus, and Top Hat — selectable in the lobby alongside hierarchical avatars with shoes, belts, sleeves, chest emblems, and spawn-protection forcefields.
   - **World Scenery Props & Pickup Pads**: Trees, snow-capped pines, street lamps, hazard barrels, team flags, neon crystals, benches, rocky island undersides, and custom medkits / shield frames / lightning bolts on spawner pads.
@@ -28,4 +29,16 @@ The codebase cleanly separates simulation from presentation:
 - `js/net.js`: Transport abstraction (`LocalLoopbackTransport` with interpolation state today, `WebSocketTransport` template included) exchanging serializable `InputCommand` and `WorldSnapshot` payloads.
 - `js/renderer.js` + `js/client.js`: Client-only input capture, snapshot interpolation, 3D WebGL2 renderer, HUD, radar minimap, and procedural audio.
 
-To take it online later, run `js/config.js` and `js/sim.js` in a Node.js WebSocket server (`ws` / PartyKit / Colyseus) and swap `LocalLoopbackTransport` for `WebSocketTransport` in `js/client.js`.
+## LAN Multiplayer
+`server.js` runs one shared authoritative `GameSim` in Node.js and serves the game. Everyone on the same Wi-Fi joins the same match.
+
+1. Install once (needs Node.js): `npm install`
+2. Start the server: `npm start` (port 3000; use `$env:PORT=3001; npm start` in PowerShell if it's busy)
+3. The server prints one URL per network adapter. Use the one from your Wi-Fi/Ethernet adapter (usually `192.168.x.x` or `10.x.x.x`; skip VirtualBox `192.168.56.1` and WSL `172.x` adapters).
+4. You and your friends open that URL and press **PLAY**. On Windows, allow `node.exe` through the firewall on **Private** networks when asked.
+
+How it works:
+- The first player to join an empty server picks the map, mode, bot count and difficulty. Later players join that match.
+- Each human takes a bot's slot; teams are balanced by human count.
+- When a match ends, the server starts the next one after 10 seconds. Press **PLAY AGAIN** to rejoin.
+- Opening `index.html` directly (or without `?lan=1`) still plays solo against bots.

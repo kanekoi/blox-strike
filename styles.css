@@ -503,11 +503,19 @@ html, body {
   height: 100%;
   background: linear-gradient(90deg, #ffd43b, #ff922b);
 }
+.dash-fill.grenade {
+  background: linear-gradient(90deg, #ff595e, #ff922b);
+}
 .dash-label {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
   color: var(--gold);
+  min-width: 112px;
+  text-align: right;
+}
+.dash-label.grenade {
+  color: #ff8078;
 }
 
 /* Classic Roblox Weapon Hotbar */

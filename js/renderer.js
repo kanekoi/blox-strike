@@ -469,13 +469,16 @@
       this.thirdPerson = false;
       this.tpDist = 4.2;
       this.adsBlend = 0;
+      this.slideBlend = 0;
       this.shakeTime = 0;
+      this._trailAccum = 0;
       this._dt = 1 / 60;
       this.sunDir = [0.48, 0.78, 0.39];
 
-      // Visual FX pools (client-side cosmetic particles & tracers)
+      // Visual FX pools (client-side cosmetic particles, tracers & 3D ejected shell casings)
       this.tracers = [];
       this.particles = [];
+      this.shells = [];
       this.explosions = [];
       this.muzzleFlashTimer = 0;
       this.muzzleColor = [1, 0.85, 0.35];
@@ -1027,6 +1030,77 @@
       }
     }
 
+    addShellCasing(x, y, z, vx, vy, vz, color, isShotgun = false, isEnergy = false) {
+      if (this.shells.length >= 64) this.shells.shift();
+      this.shells.push({
+        x,
+        y,
+        z,
+        vx,
+        vy,
+        vz,
+        rx: Math.random() * 6,
+        ry: Math.random() * 6,
+        rz: Math.random() * 6,
+        vrx: (Math.random() - 0.5) * 24,
+        vry: (Math.random() - 0.5) * 24,
+        sx: isShotgun ? 0.042 : 0.026,
+        sy: isShotgun ? 0.042 : 0.026,
+        sz: isShotgun ? 0.115 : 0.082,
+        color: color || [0.95, 0.78, 0.24],
+        emissive: isEnergy ? 0.85 : 0.12,
+        metallic: isEnergy ? 0.3 : 0.85,
+        life: 1.35,
+        maxLife: 1.35,
+      });
+    }
+
+    addSmokePuff(x, y, z, color, size = 0.16, life = 0.34, emissive = 0.05) {
+      if (this.particles.length >= 220) return;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 0.08,
+        y: y + (Math.random() - 0.5) * 0.08,
+        z: z + (Math.random() - 0.5) * 0.08,
+        vx: (Math.random() - 0.5) * 0.9,
+        vy: 0.6 + Math.random() * 0.9,
+        vz: (Math.random() - 0.5) * 0.9,
+        rx: Math.random() * 3,
+        ry: Math.random() * 3,
+        vrx: 3.5,
+        vry: 3.5,
+        size,
+        color: color || [0.85, 0.88, 0.92],
+        emissive,
+        life,
+        maxLife: life,
+        gravity: -1.2,
+      });
+    }
+
+    addSlideSparks(x, y, z, vx, vz) {
+      if (this.particles.length >= 200) return;
+      for (let i = 0; i < 2; i++) {
+        this.particles.push({
+          x: x + (Math.random() - 0.5) * 0.4,
+          y: y + 0.08,
+          z: z + (Math.random() - 0.5) * 0.4,
+          vx: -vx * 0.25 + (Math.random() - 0.5) * 2.4,
+          vy: 1.2 + Math.random() * 2.2,
+          vz: -vz * 0.25 + (Math.random() - 0.5) * 2.4,
+          rx: Math.random() * 3,
+          ry: Math.random() * 3,
+          vrx: 12,
+          vry: 12,
+          size: 0.07 + Math.random() * 0.05,
+          color: i === 0 ? [1.0, 0.85, 0.32] : [0.82, 0.9, 1.0],
+          emissive: 0.9,
+          life: 0.22 + Math.random() * 0.14,
+          maxLife: 0.36,
+          gravity: 12.0,
+        });
+      }
+    }
+
     triggerMuzzleFlash(color) {
       this.muzzleFlashTimer = 0.055;
       this.muzzleColor = color || [1, 0.88, 0.4];
@@ -1068,6 +1142,29 @@
           pt.vy *= -0.45;
           pt.vx *= 0.72;
           pt.vz *= 0.72;
+        }
+      }
+
+      for (let i = this.shells.length - 1; i >= 0; i--) {
+        const sh = this.shells[i];
+        sh.life -= dt;
+        if (sh.life <= 0) {
+          this.shells.splice(i, 1);
+          continue;
+        }
+        sh.vy -= 19.5 * dt;
+        sh.x += sh.vx * dt;
+        sh.y += sh.vy * dt;
+        sh.z += sh.vz * dt;
+        sh.rx += sh.vrx * dt;
+        sh.ry += sh.vry * dt;
+        if (sh.y < 0.04 && sh.vy < 0) {
+          sh.y = 0.04;
+          sh.vy *= -0.42;
+          sh.vx *= 0.65;
+          sh.vz *= 0.65;
+          sh.vrx *= 0.5;
+          sh.vry *= 0.5;
         }
       }
     }
@@ -1181,12 +1278,13 @@
         this._appendStaticBox(buckets, mRoot, b.w, b.h, b.d, b.color, b.tex, b.emissive || 0, true);
       }
 
-      // 2. Bake all static multi-part world scenery props
+      // 2. Bake all static multi-part world scenery props (skip shootable explosive barrels -> rendered dynamically!)
       const mapProps = map.props || [];
       const propModels = BS.MODELS && BS.MODELS.props;
       if (propModels) {
         for (let i = 0; i < mapProps.length; i++) {
           const pr = mapProps[i];
+          if (pr.m === 'barrel') continue;
           const parts = propModels[pr.m];
           if (!parts) continue;
           const s = pr.s || 1;
@@ -1393,20 +1491,26 @@
       const skinTex = opts.skinTex || null;
       const metallic = opts.metallic || 0;
       const isBlade = !!opts.isBlade;
+      const boltOffset = opts.boltOffset || 0;
+      const pumpOffset = opts.pumpOffset || 0;
+      const coilGlow = opts.coilGlow || 0;
+      const hideWarhead = !!opts.hideWarhead;
       let hasTranslucent = false;
 
       for (let i = 0; i < parts.length; i++) {
         const pt = parts[i];
+        if (pt.anim === 'warhead' && hideWarhead) continue;
         if (pt.a !== undefined && pt.a < 1) {
           hasTranslucent = true;
           continue;
         }
         const r = pt.r;
+        const animZ = pt.anim === 'bolt' ? boltOffset : pt.anim === 'pump' ? pumpOffset : 0;
         Mat4.fromTRS(
           this._mLocal,
           pt.p[0],
           pt.p[1],
-          pt.p[2],
+          pt.p[2] + animZ,
           r ? r[0] : 0,
           r ? r[1] : 0,
           r ? r[2] : 0,
@@ -1423,7 +1527,8 @@
             (pt.c === 'metal' && metallic >= 0.72) ||
             isBladeCore);
         const col = isBladeCore && useSkin ? [1, 1, 1] : this._resolvePartColor(pt.c, palette, flash);
-        const em = isBladeCore && useSkin ? 0.32 + emBoost : (pt.e || 0) + emBoost;
+        const coilBoost = pt.anim === 'coil' ? coilGlow : 0;
+        const em = isBladeCore && useSkin ? 0.32 + emBoost : (pt.e || 0) + emBoost + coilBoost;
         const uvMult = useSkin ? 1.55 : 1.0;
         const partMetallic = useSkin ? metallic : metallic * 0.45;
         this._drawWithMatrix(
@@ -1507,10 +1612,13 @@
         targetFov = 70;
       } else {
         const w = BS.WEAPON_BY_ID[localPlayer.weaponId] || BS.WEAPONS[0];
+        this.slideBlend += ((localPlayer.sliding && localPlayer.alive ? 1 : 0) - this.slideBlend) * (1 - Math.exp(-dt * 14));
         if (localPlayer.ads && localPlayer.alive) {
           targetFov = w.adsFov;
         } else if (localPlayer.speedBoostTimer > 0) {
           targetFov = 88;
+        } else if (this.slideBlend > 0.05) {
+          targetFov = 78 + this.slideBlend * 7.5;
         }
 
         // Smooth angular screen shake (never random per-frame position jitter)
@@ -1523,8 +1631,11 @@
 
         const baseY =
           localView.footY !== undefined && localView.footY !== null ? localView.footY : localPlayer.y;
+        const crouchB = localPlayer.crouchBlend || 0;
+        const crouchEye = BS.PLAYER.CROUCH_EYE_HEIGHT || 0.96;
+        const curEyeH = BS.PLAYER.EYE_HEIGHT + (crouchEye - BS.PLAYER.EYE_HEIGHT) * crouchB;
         const eyeX = localPlayer.x;
-        const eyeY = baseY + (localPlayer.alive ? BS.PLAYER.EYE_HEIGHT : 2.6);
+        const eyeY = baseY + (localPlayer.alive ? curEyeH : 2.6);
         const eyeZ = localPlayer.z;
 
         const cp = Math.cos(pitch);
@@ -1583,6 +1694,12 @@
       this.camRight = [cy, 0, sy];
       this.camUp = [-sy * sp, cp, cy * sp];
 
+      // Subtle exhilarating Dutch-angle camera roll during 1st-person power slide!
+      const roll = !isMenuDemo && !this.thirdPerson ? 0.055 * this.slideBlend : 0;
+      const upX = Math.sin(roll) * this.camRight[0];
+      const upY = Math.cos(roll);
+      const upZ = Math.sin(roll) * this.camRight[2];
+
       Mat4.perspective(this.proj, fovRad, aspect, 0.12, 260);
       Mat4.lookAt(
         this.view,
@@ -1592,9 +1709,9 @@
         this.camPos[0] + this.camForward[0],
         this.camPos[1] + this.camForward[1],
         this.camPos[2] + this.camForward[2],
-        0,
-        1,
-        0
+        upX,
+        upY,
+        upZ
       );
       Mat4.multiply(this.viewProj, this.proj, this.view);
 
@@ -1711,34 +1828,87 @@
         }
       }
 
+      // Draw Dynamic Shootable Explosive Hazard Barrels (or scorched craters while respawning!)
+      const barrelParts = BS.MODELS && BS.MODELS.props && BS.MODELS.props.barrel;
+      const barrels = snapshot.barrels || [];
+      for (let i = 0; i < barrels.length; i++) {
+        const brl = barrels[i];
+        if (brl.alive && barrelParts) {
+          const jx = brl.fusing ? Math.sin(snapshot.time * 55 + i) * 0.045 : 0;
+          const jz = brl.fusing ? Math.cos(snapshot.time * 49 + i) * 0.045 : 0;
+          const s = brl.s || 1;
+          Mat4.fromTRS(this._mRoot, brl.x + jx, brl.y, brl.z + jz, 0, 0, 0, s, s, s);
+          this._drawModel(barrelParts, this._mRoot, null, {
+            flash: brl.hurtFlash || (brl.fusing ? 0.65 : 0),
+            emBoost: brl.fusing ? 0.65 : (brl.hurtFlash || 0) * 0.35,
+          });
+        } else {
+          // Scorched dark blast mark on floor while barrel respawns
+          this._drawBox(brl.x, brl.y + 0.015, brl.z, 0, 0.4, 0, 0.92, 0.03, 0.92, [0.09, 0.09, 0.11], 4, 0);
+        }
+      }
+
       // Draw Blocky Roblox Players!
+      this._trailAccum += dt;
+      const emitTrail = this._trailAccum >= 0.028;
+      if (emitTrail) this._trailAccum = 0;
+
       for (let i = 0; i < snapshot.players.length; i++) {
         const p = snapshot.players[i];
         if (!p.alive) continue;
+        if (emitTrail && p.sliding && p.grounded) {
+          this.addSlideSparks(p.x, p.y, p.z, p.vx, p.vz);
+        }
         if (!isMenuDemo && p.id === localId && !this.thirdPerson) continue;
         this._drawRobloxAvatar(p, snapshot.time);
       }
 
-      // Draw Active Projectiles (Rockets!)
+      // Draw Active Projectiles (Rockets + Bouncy 3D Frag Blox Grenades + Exhaust/Fuse Trails!)
+      const grenadeModel = BS.MODELS && BS.MODELS.grenade;
       for (let i = 0; i < snapshot.projectiles.length; i++) {
         const pr = snapshot.projectiles[i];
-        const pyaw = Math.atan2(pr.vx, -pr.vz);
-        const ppitch = Math.atan2(pr.vy, Math.hypot(pr.vx, pr.vz) || 0.001);
-        this._drawBox(pr.x, pr.y, pr.z, ppitch, pyaw, 0, 0.24, 0.24, 0.72, [0.98, 0.28, 0.18], 4, 0.4);
-        this._drawBox(
-          pr.x - pr.vx * 0.012,
-          pr.y - pr.vy * 0.012,
-          pr.z - pr.vz * 0.012,
-          0,
-          0,
-          0,
-          0.32,
-          0.32,
-          0.32,
-          [1.0, 0.85, 0.25],
-          2,
-          1.0
-        );
+        if (pr.kind === 'grenade') {
+          const urgent = pr.life !== undefined && pr.life < 0.55;
+          const blink = urgent ? (Math.sin(snapshot.time * 32) > 0 ? 0.9 : 0.15) : 0.2;
+          if (grenadeModel) {
+            Mat4.fromTRS(this._mRoot, pr.x, pr.y, pr.z, snapshot.time * 9 + pr.id, snapshot.time * 6.5, 0, 1, 1, 1);
+            this._drawModel(grenadeModel, this._mRoot, null, { emBoost: blink });
+          } else {
+            this._drawBox(pr.x, pr.y, pr.z, snapshot.time * 9, snapshot.time * 6, 0, 0.25, 0.3, 0.25, [1.0, 0.25, 0.2], 2, 0.9);
+          }
+          if (emitTrail) {
+            this.addSmokePuff(pr.x, pr.y + 0.1, pr.z, urgent ? [1.0, 0.25, 0.18] : [1.0, 0.65, 0.22], 0.09, 0.22, 0.95);
+          }
+        } else {
+          const pyaw = Math.atan2(pr.vx, -pr.vz);
+          const ppitch = Math.atan2(pr.vy, Math.hypot(pr.vx, pr.vz) || 0.001);
+          this._drawBox(pr.x, pr.y, pr.z, ppitch, pyaw, 0, 0.24, 0.24, 0.72, [0.98, 0.28, 0.18], 4, 0.4);
+          this._drawBox(
+            pr.x - pr.vx * 0.012,
+            pr.y - pr.vy * 0.012,
+            pr.z - pr.vz * 0.012,
+            0,
+            0,
+            0,
+            0.32,
+            0.32,
+            0.32,
+            [1.0, 0.85, 0.25],
+            2,
+            1.0
+          );
+          if (emitTrail) {
+            this.addSmokePuff(pr.x - pr.vx * 0.02, pr.y - pr.vy * 0.02, pr.z - pr.vz * 0.02, [0.88, 0.9, 0.94], 0.24, 0.42, 0.08);
+            this.addSmokePuff(pr.x - pr.vx * 0.015, pr.y - pr.vy * 0.015, pr.z - pr.vz * 0.015, [1.0, 0.62, 0.18], 0.13, 0.18, 0.95);
+          }
+        }
+      }
+
+      // Draw 3D Spinning Ejected Shell Casings (opaque metallic brass/red hulls/rail cells)
+      for (let i = 0; i < this.shells.length; i++) {
+        const sh = this.shells[i];
+        Mat4.fromTRS(this.model, sh.x, sh.y, sh.z, sh.rx, sh.ry, sh.rz, sh.sx, sh.sy, sh.sz);
+        this._drawWithMatrix(this.model, sh.sx, sh.sy, sh.sz, sh.color, 4, sh.emissive, 1.0, false, null, sh.metallic);
       }
 
       // Draw Translucent VFX (Forcefields, Tracers, Explosions, Shatter Particles)
@@ -1824,15 +1994,26 @@
       const headCol = tint(p.colors.head);
       const darkCol = tint([0.12, 0.13, 0.16]);
 
-      // Avatar root transform
-      Mat4.fromTRS(this._mRoot, p.x, p.y, p.z, 0, p.yaw, 0, 1, 1, 1);
+      // Avatar root transform (supports Power Slide lean-back & Tactical Crouch drop!)
+      const crouchB = p.crouchBlend || 0;
+      const isSlide = !!p.sliding;
+      const rootYOff = isSlide ? -0.34 : -0.32 * crouchB;
+      const rootRx = isSlide ? -0.58 : 0.14 * crouchB;
+      Mat4.fromTRS(this._mRoot, p.x, p.y + rootYOff, p.z, rootRx, p.yaw, 0, 1, 1, 1);
 
-      // Ground contact shadow
-      this._drawChild(this._mRoot, 0, 0.02, 0, 0, 0, 0, 0.95, 0.02, 0.72, [0.06, 0.07, 0.1], 4, 0, 1);
+      // Ground contact shadow (flat on floor)
+      this._drawBox(p.x, p.y + 0.02, p.z, 0, p.yaw, 0, 0.95, 0.02, isSlide ? 1.25 : 0.72, [0.06, 0.07, 0.1], 4, 0, 1);
 
       // Left & Right Legs (hierarchical hip pivot + shoes)
-      const legRxL = p.grounded ? Math.sin(p.walkPhase) * 0.7 * amp : 0.35;
-      const legRxR = p.grounded ? -Math.sin(p.walkPhase) * 0.7 * amp : -0.25;
+      let legRxL = p.grounded ? Math.sin(p.walkPhase) * 0.7 * amp : 0.35;
+      let legRxR = p.grounded ? -Math.sin(p.walkPhase) * 0.7 * amp : -0.25;
+      if (isSlide) {
+        legRxL = -0.55;
+        legRxR = 1.2;
+      } else if (crouchB > 0.2) {
+        legRxL = legRxL * 0.5 + 0.45 * crouchB;
+        legRxR = legRxR * 0.5 - 0.35 * crouchB;
+      }
 
       Mat4.fromTRS(this._mLocal, -0.2, 0.72, 0, legRxL, 0, 0, 1, 1, 1);
       Mat4.multiply(this._mB, this._mRoot, this._mLocal);
@@ -1943,6 +2124,14 @@
       let ry = (vm.vmRot ? vm.vmRot[1] : 0) - swayX * 1.4;
       let rz = (vm.vmRot ? vm.vmRot[2] : 0) + swayX * 1.8;
 
+      // Stylish inward tactical tilt while power-sliding!
+      if (this.slideBlend > 0.01) {
+        const sTilt = this.slideBlend * (1 - ads * 0.85);
+        rz += 0.26 * sTilt;
+        y -= 0.035 * sTilt;
+        x -= 0.02 * sTilt;
+      }
+
       // Snappy weapon equip raise animation on slot switch
       const equipDip = (localView && localView.equipDip) || 0;
       if (equipDip > 0) {
@@ -1986,26 +2175,43 @@
 
       Mat4.fromTRS(this._mRoot, x, y, z, rx, ry, rz, 1, 1, 1);
 
+      // Mechanical moving weapon parts (bolt blowback, shotgun pump rack, railgun coil surge, RPG warhead visibility!)
+      const boltOffset =
+        p.reloading && p.reloadProgress > 0.75
+          ? Math.sin(((p.reloadProgress - 0.75) / 0.25) * Math.PI) * 0.12
+          : Math.min(1, p.recoilKick * 1.6) * 0.11;
+      let pumpOffset = 0;
+      if (w.id === 'shotgun' && p.recoilKick > 0.05 && p.recoilKick < 0.72) {
+        pumpOffset = Math.sin(((0.72 - p.recoilKick) / 0.67) * Math.PI) * 0.145;
+      }
+      const coilGlow = w.id === 'sniper' ? p.recoilKick * 0.9 + (p.ads ? 0.35 : 0) : 0;
+      const hideWarhead = w.id === 'rocket' && (p.ammo <= 0 || p.reloading);
+
       const skinSetup = this._getWeaponSkinSetup(w, p);
       this._drawModel(vm.parts, this._mRoot, skinSetup.palette, {
         skinTex: skinSetup.skinTex,
         metallic: skinSetup.metallic,
         isBlade: skinSetup.isBlade,
+        boltOffset,
+        pumpOffset,
+        coilGlow,
+        hideWarhead,
       });
 
       // Right hand & sleeve gripping weapon
       this._drawChild(this._mRoot, 0, -0.06, 0.05, 0, 0, 0, 0.09, 0.1, 0.14, p.colors.head, 4, 0);
       this._drawChild(this._mRoot, 0.03, -0.13, 0.24, 0.5, 0, 0, 0.1, 0.1, 0.36, p.colors.torso, 4, 0);
 
-      // Support left hand & sleeve (for 2-handed firearms)
+      // Support left hand & sleeve (tracks the sliding shotgun pump in real time!)
       if (vm.leftHand) {
         const lh = vm.leftHand;
-        this._drawChild(this._mRoot, lh[0], lh[1] - 0.03, lh[2], 0, 0, 0, 0.1, 0.09, 0.14, p.colors.head, 4, 0);
+        const lhZ = lh[2] + pumpOffset;
+        this._drawChild(this._mRoot, lh[0], lh[1] - 0.03, lhZ, 0, 0, 0, 0.1, 0.09, 0.14, p.colors.head, 4, 0);
         this._drawChild(
           this._mRoot,
           lh[0] - 0.08,
           lh[1] - 0.12,
-          lh[2] + 0.24,
+          lhZ + 0.24,
           0.5,
           0.35,
           0,

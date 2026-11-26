@@ -24,6 +24,7 @@
       this.audio = new BS.SoundEngine();
       this.sim = new BS.GameSim();
       this.transport = new BS.LocalLoopbackTransport(this.sim);
+      this.localTransport = this.transport; // menu demo always runs locally, even in LAN mode
 
       // State
       this.state = 'menu'; // 'menu' | 'playing' | 'paused' | 'matchOver'
@@ -60,6 +61,7 @@
       this.lastWeaponSlot = 2;
       this.currentWeaponSlot = 1;
       this.pendingDash = false;
+      this.pendingGrenade = false;
       this.pendingReload = false;
       this.viewW = window.innerWidth;
       this.viewH = window.innerHeight;
@@ -87,6 +89,8 @@
         shieldVal: document.getElementById('shield-val'),
         dashFill: document.getElementById('dash-fill'),
         dashLabel: document.getElementById('dash-label'),
+        grenadeFill: document.getElementById('grenade-fill'),
+        grenadeLabel: document.getElementById('grenade-label'),
         speedPill: document.getElementById('speed-pill'),
         weaponSkinBadge: document.getElementById('weapon-skin-badge'),
         weaponName: document.getElementById('weapon-name'),
@@ -114,6 +118,8 @@
       // Dev URL parameters for quick visual testing (?autostart=1&cam=3&wskin=asiimov&inspect=1&weapon=4)
       const params = new URLSearchParams(window.location.search);
       this.forceAds = params.get('ads') === '1';
+      // ?lan=1 (set automatically by server.js) joins the shared match on the LAN server instead of a solo game
+      this.lanMode = params.get('lan') === '1';
       const qWskin = params.get('wskin');
       if (qWskin && BS.WEAPON_SKIN_BY_ID && BS.WEAPON_SKIN_BY_ID[qWskin]) {
         this.settings.weaponSkinId = qWskin;
@@ -246,6 +252,10 @@
 
     _startMenuDemo() {
       this.state = 'menu';
+      if (this.transport !== this.localTransport) {
+        this.transport.disconnect();
+        this.transport = this.localTransport;
+      }
       const conn = this.transport.connect({
         mapId: this.settings.mapId,
         modeId: 'tdm',
@@ -289,6 +299,11 @@
       }
       document.getElementById('killfeed').replaceChildren();
 
+      if (this.lanMode) {
+        this._startLanMatch();
+        return;
+      }
+
       const conn = this.transport.connect({
         mapId: this.settings.mapId,
         modeId: this.settings.modeId,
@@ -314,6 +329,60 @@
       this._updateOverlays();
       this._buildHotbar();
       this._requestPointerLock();
+    }
+
+    async _startLanMatch() {
+      if (this.transport !== this.localTransport) this.transport.disconnect();
+      const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new BS.WebSocketTransport(`${scheme}://${window.location.host}/ws`);
+      this.transport = ws;
+      this.snapshot = null;
+      this.localId = null;
+      this.wasAlive = false; // first alive snapshot syncs yaw/camera like a respawn
+      this._bindTransport();
+      const backToMenu = (title, sub) => {
+        if (this.transport !== ws) return;
+        if (document.pointerLockElement) document.exitPointerLock();
+        this._startMenuDemo();
+        this._updateOverlays();
+        this._showBanner(title, sub, 3);
+      };
+      ws.onClose = () => backToMenu('DISCONNECTED', 'LAN SERVER CLOSED THE CONNECTION');
+
+      this.state = 'playing';
+      this._updateOverlays();
+      this._requestPointerLock(); // must run inside the click gesture, before awaiting the server
+
+      let conn;
+      try {
+        conn = await ws.connect({
+          mapId: this.settings.mapId,
+          modeId: this.settings.modeId,
+          botCount: this.settings.botCount,
+          playerName: this.settings.playerName,
+          skinId: this.settings.skinId,
+          accessoryId: this.settings.accessoryId,
+          weaponSkinId: this.settings.weaponSkinId,
+          difficulty: this.settings.difficulty,
+        });
+      } catch {
+        backToMenu('NO LAN SERVER', 'START IT WITH: npm start');
+        return;
+      }
+      if (this.transport !== ws) return;
+      this.localId = conn.playerId;
+      // Local sim is never stepped in LAN mode: it only holds the server's map for camera collision + raycasts.
+      this.sim.startMatch({ mapId: conn.mapId, modeId: conn.modeId, botCount: 0, demoMode: true });
+      this.sim.players = [];
+      this.sim.playerMap = Object.create(null);
+      this._buildHotbar();
+    }
+
+    // Authoritative local player: sim object when playing solo, latest snapshot entry in LAN mode.
+    _localPlayer() {
+      const simP = this.sim.playerMap[this.localId];
+      if (simP) return simP;
+      return (this.snapshot && this.snapshot.players.find((p) => p.id === this.localId)) || null;
     }
 
     _requestPointerLock() {
@@ -565,9 +634,12 @@
           this.keys = {};
           this.mouseDown.left = false;
           this.mouseDown.right = false;
+          // LAN server keeps running while paused: send one all-released input so the avatar stops
+          if (this.lanMode && this.localId) this._sendLocalInput(0, true);
           this.pendingFire = false;
           this.pendingJump = false;
           this.pendingDash = false;
+          this.pendingGrenade = false;
           this._updateOverlays();
         }
       });
@@ -587,6 +659,7 @@
         this.pendingFire = false;
         this.pendingJump = false;
         this.pendingDash = false;
+        this.pendingGrenade = false;
       });
 
       // Click canvas while playing to re-engage pointer lock seamlessly
@@ -620,8 +693,9 @@
           return;
         }
         if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
-        const localPlayer = this.sim.playerMap[this.localId];
-        const adsMult = localPlayer && localPlayer.input.ads ? (localPlayer.weaponId === 'sniper' ? 0.35 : 0.65) : 1.0;
+        const localPlayer = this._localPlayer();
+        const isAds = localPlayer && (localPlayer.input ? localPlayer.input.ads : localPlayer.ads);
+        const adsMult = isAds ? (localPlayer.weaponId === 'sniper' ? 0.35 : 0.65) : 1.0;
         const sens = this.settings.sensitivity * adsMult;
         const dYaw = e.movementX * sens;
         const dPitch = -e.movementY * sens;
@@ -660,8 +734,11 @@
           this.pendingJump = true;
         }
 
-        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyC') {
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
           this.pendingDash = true;
+        }
+        if (e.code === 'KeyG' && !e.repeat) {
+          this.pendingGrenade = true;
         }
         if (e.code === 'KeyR') {
           this.pendingReload = true;
@@ -710,7 +787,7 @@
     }
 
     _getActualWeaponSlot() {
-      const lp = this.sim && this.sim.playerMap && this.sim.playerMap[this.localId];
+      const lp = this._localPlayer();
       const w = lp && BS.WEAPON_BY_ID[lp.weaponId];
       return w ? w.slot : this.currentWeaponSlot;
     }
@@ -821,11 +898,56 @@
           sy -= 0.08;
           sz += rz * 0.34 - Math.cos(lp.yaw) * 0.45;
         }
+
+        // Eject physical 3D spinning brass / buckshot / rail-cell shell casing!
+        const wModel = BS.MODELS && BS.MODELS.weapons && BS.MODELS.weapons[w.id];
+        if (wModel && wModel.eject && (isLocal || distScale(ev.ox, ev.oy, ev.oz) > 0.35)) {
+          const isShotgun = w.id === 'shotgun';
+          const isEnergy = w.id === 'sniper';
+          if (isLocal && !this.renderer.thirdPerson) {
+            const cr = this.renderer.camRight;
+            const cf = this.renderer.camForward;
+            const cu = this.renderer.camUp;
+            const ex = this.renderer.camPos[0] + cr[0] * 0.28 + cf[0] * 0.45 - cu[0] * 0.14;
+            const ey = this.renderer.camPos[1] + cr[1] * 0.28 + cf[1] * 0.45 - cu[1] * 0.14;
+            const ez = this.renderer.camPos[2] + cr[2] * 0.28 + cf[2] * 0.45 - cu[2] * 0.14;
+            const sideSpd = 2.4 + Math.random() * 1.1;
+            const upSpd = 2.2 + Math.random() * 1.0;
+            this.renderer.addShellCasing(
+              ex,
+              ey,
+              ez,
+              cr[0] * sideSpd + (lp ? lp.vx * 0.35 : 0),
+              upSpd,
+              cr[2] * sideSpd + (lp ? lp.vz * 0.35 : 0),
+              wModel.shellColor,
+              isShotgun,
+              isEnergy
+            );
+          } else {
+            const yawS = ev.yaw || 0;
+            const rx = Math.cos(yawS);
+            const rz = Math.sin(yawS);
+            this.renderer.addShellCasing(
+              ev.ox + rx * 0.45,
+              ev.oy - 0.1,
+              ev.oz + rz * 0.45,
+              rx * (2.2 + Math.random()),
+              2.1 + Math.random(),
+              rz * (2.2 + Math.random()),
+              wModel.shellColor,
+              isShotgun,
+              isEnergy
+            );
+          }
+        }
+
         const width = w.id === 'sniper' ? 0.075 : 0.04;
         const life = w.id === 'sniper' ? 0.24 : 0.1;
         ev.hits.forEach((h) => {
           this.renderer.addTracer(sx, sy, sz, h.x, h.y, h.z, w.tracerColor, width, life);
-          this.renderer.addImpactSparks(h.x, h.y, h.z, h.hitPlayer ? [1, 0.9, 0.25] : w.tracerColor, h.hitPlayer ? 7 : 4);
+          const sparkCol = h.hitBarrel ? [1.0, 0.52, 0.14] : h.hitPlayer ? [1, 0.9, 0.25] : w.tracerColor;
+          this.renderer.addImpactSparks(h.x, h.y, h.z, sparkCol, h.hitPlayer || h.hitBarrel ? 7 : 4);
         });
       } else if (ev.type === 'hit') {
         if (ev.attackerId === this.localId) {
@@ -909,6 +1031,21 @@
         const s = distScale(ev.x, ev.y, ev.z);
         this.audio.playExplosion(s);
         if (s > 0.4) this.renderer.addScreenShake(0.32 * s);
+      } else if (ev.type === 'barrelExplode') {
+        this.renderer.addBlockShatter(ev.x, ev.y, ev.z, {
+          head: [0.86, 0.24, 0.16],
+          torso: [0.16, 0.16, 0.2],
+          legs: [1.0, 0.72, 0.16],
+        });
+      } else if (ev.type === 'slide' && ev.playerId === this.localId) {
+        this.audio.playSlide();
+      } else if (ev.type === 'grenadeThrow') {
+        if (ev.playerId === this.localId) {
+          this.audio.playGrenadeThrow();
+          this.renderer.addScreenShake(0.06);
+        }
+      } else if (ev.type === 'grenadeBounce') {
+        this.audio.playGrenadeBounce(distScale(ev.x, ev.y, ev.z));
       } else if (ev.type === 'jumpPad' && ev.playerId === this.localId) {
         this.audio.playJumpPad();
       } else if (ev.type === 'dash' && ev.playerId === this.localId) {
@@ -930,7 +1067,13 @@
     _pushKillfeed(ev) {
       const feed = document.getElementById('killfeed');
       const w = BS.WEAPON_BY_ID[ev.weaponId];
-      const wLabel = w ? w.shortName : 'VOID';
+      const wLabel = w
+        ? w.shortName
+        : ev.weaponId === 'grenade'
+        ? 'FRAG'
+        : ev.weaponId === 'barrel'
+        ? 'BARREL'
+        : 'VOID';
       const row = document.createElement('div');
       row.className = 'killfeed-item' + (ev.killerId === this.localId || ev.victimId === this.localId ? ' mine' : '');
       const teamCls = (t) => (t === 'blue' ? 't-blue' : t === 'red' ? 't-red' : 't-ffa');
@@ -1168,7 +1311,7 @@
       requestAnimationFrame((t) => this._loop(t));
     }
 
-    _sendLocalInput(dt) {
+    _sendLocalInput(dt, force = false) {
       let moveX = 0;
       let moveZ = 0;
       if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ += 1;
@@ -1182,7 +1325,7 @@
       let aimPitch = viewPitch;
 
       // 3rd-person crosshair convergence: cast from camera to find target point, aim from eye to that point
-      const localSimP = this.sim.playerMap[this.localId];
+      const localSimP = this._localPlayer();
       if (this.renderer.thirdPerson && localSimP && localSimP.alive && this.snapshot) {
         // Note: uses static map/world raycast from sim; for online MP, replace with client-side map raycast.
         const camP = this.renderer.camPos;
@@ -1218,6 +1361,8 @@
         pitch: aimPitch,
         jump: !!this.keys['Space'] || this.pendingJump,
         dash: this.pendingDash,
+        crouch: !!(this.keys['KeyC'] || this.keys['ControlLeft']),
+        grenade: this.pendingGrenade,
         fire: (this.mouseDown.left || this.pendingFire) && this.pointerLocked,
         ads: (this.mouseDown.right && this.pointerLocked) || !!this.forceAds,
         reload: this.pendingReload,
@@ -1227,9 +1372,10 @@
       this.pendingFire = false;
       this.pendingJump = false;
       this.pendingDash = false;
+      this.pendingGrenade = false;
       this.pendingReload = false;
 
-      this.transport.sendInput(cmd);
+      this.transport.sendInput(cmd, force);
     }
 
     _setHudText(el, key, val) {
@@ -1281,7 +1427,10 @@
         w.id === 'sniper' && lp.ads && lp.alive && !this.renderer.thirdPerson && this.renderer.adsBlend > 0.35;
       this._setHudClassToggle(ui.scope, 'hidden', 'scopeHide', !scoped);
       this._setHudClassToggle(ui.crosshair, 'hidden', 'chHide', scoped || !lp.alive);
-      const gap = Math.max(3, Math.round(6 + Math.hypot(lp.vx, lp.vz) * 0.7 + lp.recoilKick * 18 - (lp.ads ? 4 : 0)));
+      const gap = Math.max(
+        3,
+        Math.round(6 + Math.hypot(lp.vx, lp.vz) * 0.7 + lp.recoilKick * 18 - (lp.ads ? 4 : 0) - (lp.crouching ? 2 : 0))
+      );
       if (this._hudState.chGap !== gap) {
         this._hudState.chGap = gap;
         ui.crosshair.style.setProperty('--gap', gap + 'px');
@@ -1333,6 +1482,14 @@
       const dashPct = dashReady ? 100 : (1 - lp.dashCooldown / BS.PLAYER.DASH_COOLDOWN) * 100;
       this._setHudWidth(ui.dashFill, 'dashW', dashPct);
       this._setHudText(ui.dashLabel, 'dashL', dashReady ? 'DASH READY [SHIFT]' : 'RECHARGING...');
+
+      if (ui.grenadeFill && ui.grenadeLabel) {
+        const gCd = lp.grenadeCooldown || 0;
+        const gMax = (BS.GRENADE && BS.GRENADE.COOLDOWN) || 7.0;
+        const gReady = gCd <= 0;
+        this._setHudWidth(ui.grenadeFill, 'grenW', gReady ? 100 : (1 - gCd / gMax) * 100);
+        this._setHudText(ui.grenadeLabel, 'grenL', gReady ? 'FRAG READY [G]' : `FRAG ${gCd.toFixed(1)}s`);
+      }
 
       const hasSpeed = lp.speedBoostTimer > 0;
       this._setHudClassToggle(ui.speedPill, 'hidden', 'spHide', !hasSpeed);
@@ -1413,7 +1570,7 @@
           if (blocked.hit) continue;
         }
 
-        const scr = this.renderer.projectToScreen(p.x, p.y + 2.28, p.z);
+        const scr = this.renderer.projectToScreen(p.x, p.y + 2.28 - 0.45 * (p.crouchBlend || 0), p.z);
         if (!scr) continue;
 
         const barW = Math.max(38, Math.min(68, 700 / Math.max(6, dist)));
@@ -1478,6 +1635,29 @@
             ctx.restore();
           }
         }
+      }
+
+      // 2b. Live Nearby Frag Grenade Danger Indicator
+      for (let i = 0; i < snap.projectiles.length; i++) {
+        const pr = snap.projectiles[i];
+        if (pr.kind !== 'grenade') continue;
+        const gd = Math.hypot(pr.x - lp.x, pr.y - lp.y, pr.z - lp.z);
+        if (gd > 9.5) continue;
+        const scr = this.renderer.projectToScreen(pr.x, pr.y + 0.42, pr.z);
+        if (!scr) continue;
+        ctx.save();
+        ctx.font = '900 12px "Segoe UI", system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255, 42, 60, 0.9)';
+        ctx.beginPath();
+        ctx.arc(scr.x, scr.y, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffd43b';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('!', scr.x, scr.y + 4);
+        ctx.restore();
       }
 
       // 3. Floating Damage Numbers (crisp pop-up arcade numbers!)
