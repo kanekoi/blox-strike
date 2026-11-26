@@ -203,6 +203,28 @@
       if (!this.ctx) return;
       this._tone('sine', 760, 520, 0.045, 0.12);
     }
+
+    playWeaponSwitch() {
+      if (!this.ctx) return;
+      this._noise(0.03, 'bandpass', 2400, 2.0, 0.12);
+      this._tone('triangle', 460, 680, 0.05, 0.14);
+    }
+
+    playLevelUp() {
+      if (!this.ctx) return;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((n, idx) => {
+        this._tone('triangle', n, n * 1.03, 0.16, 0.22, 0.001, idx * 0.065);
+      });
+    }
+
+    playBountyClaim() {
+      if (!this.ctx) return;
+      const notes = [659.25, 880, 1174.66, 1318.5];
+      notes.forEach((n, idx) => {
+        this._tone('sine', n, n * 1.02, 0.15, 0.24, 0.001, idx * 0.055);
+      });
+    }
   }
 
   BS.SoundEngine = SoundEngine;

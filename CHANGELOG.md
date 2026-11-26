@@ -2,6 +2,26 @@
 
 All major updates to **BLOX STRIKE** are committed and tagged in Git.
 
+## v1.1.0 — CS2 Weapon Finishes, XP Levels & Bounties, Clean Sights, Security & Zero-Jitter Responsiveness
+- **Match XP Leveling & Killstreak Bounties (`LVL 1`–`25`)** (`js/config.js`, `js/sim.js`, `js/client.js`, `js/renderer.js`, `index.html`, `styles.css`):
+  - Both human players and AI bots earn XP from eliminations (`+60 XP`), headshots (`+25 XP`), KOTH zone control (`+8 XP/s`), and **Bounty Shutdowns** (`+90` to `+350 XP`).
+  - Leveling up triggers an instant combat surge (`+25 HP` & `+20 Shield`) plus passive scaling per level (`+4 Max HP`, `+1.4%` movement speed, and `+3%` faster reloads up to Lv.10).
+  - Any player or bot reaching a `3+` KO streak gets an escalating **Wanted Bounty** (`★ BOUNTY +90..350 XP`) shown on 3D overhead tags, golden shoulder aura trim, radar target rings, HUD pills, and the scoreboard; eliminating them claims the full bounty XP and bonus match score.
+- **Bulletproof Weapon Switching & Wide-Open ADS Sights** (`js/client.js`, `js/sim.js`, `js/models.js`, `js/renderer.js`, `styles.css`):
+  - Persistent `desiredWeaponSlot` handshake supporting `1`–`6`, `Numpad 1`–`6`, `E` (next), `Q` (last), debounced mouse wheel, clickable hotbar slots, and weapon selection while respawning.
+  - Redesigned all 1st-person weapon sights into open panoramic micro-frames, lowered hip/ADS viewmodel offsets, stabilized upward ADS recoil kick, and widened the Railgun Sniper scope so sights never block the crosshair.
+- **Ultra-Responsive Zero-Jitter Frame Pipeline** (`js/net.js`, `js/client.js`, `js/sim.js`, `js/renderer.js`, `styles.css`):
+  - **Frame-synchronized sub-stepped simulation**: Eliminated 60Hz VSync beat-frequency micro-stutter and 16.7ms interpolation lag in local play while maintaining exact framerate-independent physics across `60Hz`, `144Hz`, `240Hz`, and `360Hz` displays.
+  - **Sub-frame click & jump latching + `O(1)` mouse handling**: Quick mouse taps and `Space` presses between frames never drop; replaced `1/dt` mouse sway velocity division with a critically-damped impulse filter and true stair `stepOffsetY` decay.
+  - **WebGL2 static map VAO batching & GL state caching**: Pre-baked static arena blocks, multi-part scenery props, and pad bases into 3–4 static VAO draw calls per map (cutting ~350 draw calls/frame) and cached uniform/texture binds.
+  - **Zero-stall HUD compositing**: Removed live `#hud` `backdrop-filter: blur()` passes that forced GPU framebuffer readbacks every frame, cached HUD DOM references, and added dirty-value checks so unchanged HUD nodes are never mutated.
+- **10 CS2-Inspired Weapon Skins + `[F]` Inspect** (`js/config.js`, `js/renderer.js`, `js/client.js`, `index.html`, `styles.css`):
+  - Added Factory Stock, **Asiimov**, **Dragon Lore**, **Hyper Beast**, **Printstream**, **Fade**, **Case Hardened (Blue Gem)**, **Redline**, **Doppler Ruby**, and **Doppler Sapphire** with procedural 256×256 textures, `uMetallic` specular/Fresnel shader sheen, rarity-colored lobby chips & HUD badges, and `[F]` CS2-style Weapon Inspect animation.
+- **Dynamic All-Weapon Bot AI** (`js/sim.js`):
+  - Bots now spawn with and dynamically switch across all 6 weapons (`BLOX-AR`, `STUD-12`, `HYPER-SMG`, `RAIL-BLOX`, `BRICK-RPG`, `NEON BLADE`) based on engagement range, reload pressure, and close-range RPG splash safety, while rocking random CS2 weapon skins.
+- **Security & Anti-DoS Hardening** (`index.html`, `js/client.js`, `js/sim.js`, `js/net.js`, `SECURITY.md`):
+  - Added strict Content Security Policy (`CSP`), eliminated all `.innerHTML` sinks, hardened `localStorage` & `WebSocketTransport` packet parsing against prototype pollution and oversized payloads (`64KB` cap, `ws:/wss:` allowlist), and added authoritative input sanitization, entity caps, and per-player flood rate limiting (`360/s`).
+
 ## v1.0.0 — Initial Tracked Release
 - **Custom 3D WebGL2 Block Engine** (`js/renderer.js`): Procedural Roblox stud, crate, tile, and smiley-face textures; sunlit plastic shading; drifting blocky clouds; shatter death physics; tracers; explosions; spawn-protection forcefields.
 - **Custom Multi-Part 3D Model Library** (`js/models.js`):

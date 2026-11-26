@@ -138,6 +138,7 @@
     uniform vec3 uColor;
     uniform float uEmissive;
     uniform float uAlpha;
+    uniform float uMetallic;
     uniform int uTexMode; // 0=studs(top only), 1=full tex, 2=face(front only), 3=solid
     uniform vec3 uCamPos;
     uniform vec3 uFogColor;
@@ -175,16 +176,20 @@
         }
       }
 
-      // Hemisphere ambient + directional sunlight + glossy Roblox plastic specular
+      // Hemisphere ambient + directional sunlight + metallic / glossy plastic specular
       float ndl = max(dot(N, L), 0.0);
       float hemi = N.y * 0.5 + 0.5;
       vec3 ambient = mix(vec3(0.32, 0.34, 0.42), vec3(0.68, 0.74, 0.84), hemi);
       vec3 diffuse = vec3(1.0, 0.97, 0.92) * ndl * 0.72;
 
       vec3 H = normalize(L + V);
-      float spec = pow(max(dot(N, H), 0.0), 36.0) * 0.24 * step(0.01, ndl);
+      float shininess = mix(36.0, 18.0, uMetallic);
+      float specStrength = 0.24 + uMetallic * 0.68;
+      float spec = pow(max(dot(N, H), 0.0), shininess) * specStrength * step(0.01, ndl);
+      vec3 specTint = mix(vec3(1.0), albedo * 1.15 + vec3(0.25), uMetallic * 0.7);
+      float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0) * uMetallic * 0.34;
 
-      vec3 lit = albedo * (ambient * 0.72 + diffuse) + vec3(spec);
+      vec3 lit = albedo * (ambient * 0.72 + diffuse) + specTint * spec + mix(albedo, vec3(1.0), 0.4) * fresnel;
       vec3 finalCol = mix(lit, albedo * 1.15, clamp(uEmissive, 0.0, 1.0));
 
       // Atmospheric depth fog (disabled for viewmodel when uFogDensity == 0)
@@ -195,6 +200,88 @@
       }
 
       outColor = vec4(finalCol, uAlpha);
+    }
+  `;
+
+  const STATIC_VS = `#version 300 es
+    precision highp float;
+    layout(location = 0) in vec3 aPos;
+    layout(location = 1) in vec3 aNorm;
+    layout(location = 2) in vec2 aUV;
+    layout(location = 3) in vec3 aColor;
+    layout(location = 4) in vec2 aMeta;
+
+    uniform mat4 uViewProj;
+
+    out vec3 vNormal;
+    out vec3 vWorldPos;
+    out vec2 vUV;
+    out vec3 vColor;
+    out vec2 vMeta;
+
+    void main() {
+      vWorldPos = aPos;
+      vNormal = aNorm;
+      vUV = aUV;
+      vColor = aColor;
+      vMeta = aMeta;
+      gl_Position = uViewProj * vec4(aPos, 1.0);
+    }
+  `;
+
+  const STATIC_FS = `#version 300 es
+    precision highp float;
+    in vec3 vNormal;
+    in vec3 vWorldPos;
+    in vec2 vUV;
+    in vec3 vColor;
+    in vec2 vMeta;
+
+    uniform sampler2D uTex;
+    uniform int uTexMode;
+    uniform vec3 uCamPos;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    uniform vec3 uSunDir;
+
+    out vec4 outColor;
+
+    void main() {
+      vec3 N = normalize(vNormal);
+      vec3 L = normalize(uSunDir);
+      vec3 V = normalize(uCamPos - vWorldPos);
+
+      vec3 albedo = vColor;
+      if (uTexMode == 0) {
+        if (vMeta.y > 0.5) {
+          albedo *= texture(uTex, vUV).rgb;
+        } else {
+          vec2 edge = abs(fract(vUV * 0.5) - 0.5);
+          float seam = smoothstep(0.47, 0.5, max(edge.x, edge.y));
+          albedo *= (1.0 - seam * 0.08);
+        }
+      } else if (uTexMode == 1) {
+        albedo *= texture(uTex, vUV).rgb;
+      }
+
+      float ndl = max(dot(N, L), 0.0);
+      float hemi = N.y * 0.5 + 0.5;
+      vec3 ambient = mix(vec3(0.32, 0.34, 0.42), vec3(0.68, 0.74, 0.84), hemi);
+      vec3 diffuse = vec3(1.0, 0.97, 0.92) * ndl * 0.72;
+
+      vec3 H = normalize(L + V);
+      float spec = pow(max(dot(N, H), 0.0), 36.0) * 0.24 * step(0.01, ndl);
+
+      vec3 lit = albedo * (ambient * 0.72 + diffuse) + vec3(spec);
+      vec3 finalCol = mix(lit, albedo * 1.15, clamp(vMeta.x, 0.0, 1.0));
+
+      if (uFogDensity > 0.0) {
+        float dist = length(vWorldPos - uCamPos);
+        float fogFactor = 1.0 - exp(-pow(dist * uFogDensity, 1.45));
+        finalCol = mix(finalCol, uFogColor, clamp(fogFactor, 0.0, 0.92));
+      }
+
+      outColor = vec4(finalCol, 1.0);
     }
   `;
 
@@ -254,62 +341,62 @@
     }
   `;
 
+  // 24 vertices (4 per face), strictly counter-clockwise (CCW) outward winding!
+  // prettier-ignore
+  const CUBE_VERTS = new Float32Array([
+    // Front (-Z)
+     0.5,-0.5,-0.5,  0,0,-1,  0,1,
+    -0.5,-0.5,-0.5,  0,0,-1,  1,1,
+    -0.5, 0.5,-0.5,  0,0,-1,  1,0,
+     0.5, 0.5,-0.5,  0,0,-1,  0,0,
+    // Back (+Z)
+    -0.5,-0.5, 0.5,  0,0, 1,  0,1,
+     0.5,-0.5, 0.5,  0,0, 1,  1,1,
+     0.5, 0.5, 0.5,  0,0, 1,  1,0,
+    -0.5, 0.5, 0.5,  0,0, 1,  0,0,
+    // Top (+Y)
+    -0.5, 0.5, 0.5,  0, 1,0,  0,1,
+     0.5, 0.5, 0.5,  0, 1,0,  1,1,
+     0.5, 0.5,-0.5,  0, 1,0,  1,0,
+    -0.5, 0.5,-0.5,  0, 1,0,  0,0,
+    // Bottom (-Y)
+    -0.5,-0.5,-0.5,  0,-1,0,  0,1,
+     0.5,-0.5,-0.5,  0,-1,0,  1,1,
+     0.5,-0.5, 0.5,  0,-1,0,  1,0,
+    -0.5,-0.5, 0.5,  0,-1,0,  0,0,
+    // Right (+X)
+     0.5,-0.5, 0.5,  1,0,0,   0,1,
+     0.5,-0.5,-0.5,  1,0,0,   1,1,
+     0.5, 0.5,-0.5,  1,0,0,   1,0,
+     0.5, 0.5, 0.5,  1,0,0,   0,0,
+    // Left (-X)
+    -0.5,-0.5,-0.5, -1,0,0,   0,1,
+    -0.5,-0.5, 0.5, -1,0,0,   1,1,
+    -0.5, 0.5, 0.5, -1,0,0,   1,0,
+    -0.5, 0.5,-0.5, -1,0,0,   0,0,
+  ]);
+
+  // prettier-ignore
+  const CUBE_INDICES = new Uint16Array([
+     0, 1, 2,  0, 2, 3,
+     4, 5, 6,  4, 6, 7,
+     8, 9,10,  8,10,11,
+    12,13,14, 12,14,15,
+    16,17,18, 16,18,19,
+    20,21,22, 20,22,23,
+  ]);
+
   function createUnitCubeMesh(gl) {
-    // 24 vertices (4 per face), strictly counter-clockwise (CCW) outward winding!
-    // prettier-ignore
-    const verts = new Float32Array([
-      // Front (-Z)
-       0.5,-0.5,-0.5,  0,0,-1,  0,1,
-      -0.5,-0.5,-0.5,  0,0,-1,  1,1,
-      -0.5, 0.5,-0.5,  0,0,-1,  1,0,
-       0.5, 0.5,-0.5,  0,0,-1,  0,0,
-      // Back (+Z)
-      -0.5,-0.5, 0.5,  0,0, 1,  0,1,
-       0.5,-0.5, 0.5,  0,0, 1,  1,1,
-       0.5, 0.5, 0.5,  0,0, 1,  1,0,
-      -0.5, 0.5, 0.5,  0,0, 1,  0,0,
-      // Top (+Y)
-      -0.5, 0.5, 0.5,  0, 1,0,  0,1,
-       0.5, 0.5, 0.5,  0, 1,0,  1,1,
-       0.5, 0.5,-0.5,  0, 1,0,  1,0,
-      -0.5, 0.5,-0.5,  0, 1,0,  0,0,
-      // Bottom (-Y)
-      -0.5,-0.5,-0.5,  0,-1,0,  0,1,
-       0.5,-0.5,-0.5,  0,-1,0,  1,1,
-       0.5,-0.5, 0.5,  0,-1,0,  1,0,
-      -0.5,-0.5, 0.5,  0,-1,0,  0,0,
-      // Right (+X)
-       0.5,-0.5, 0.5,  1,0,0,   0,1,
-       0.5,-0.5,-0.5,  1,0,0,   1,1,
-       0.5, 0.5,-0.5,  1,0,0,   1,0,
-       0.5, 0.5, 0.5,  1,0,0,   0,0,
-      // Left (-X)
-      -0.5,-0.5,-0.5, -1,0,0,   0,1,
-      -0.5,-0.5, 0.5, -1,0,0,   1,1,
-      -0.5, 0.5, 0.5, -1,0,0,   1,0,
-      -0.5, 0.5,-0.5, -1,0,0,   0,0,
-    ]);
-
-    // prettier-ignore
-    const indices = new Uint16Array([
-       0, 1, 2,  0, 2, 3,
-       4, 5, 6,  4, 6, 7,
-       8, 9,10,  8,10,11,
-      12,13,14, 12,14,15,
-      16,17,18, 16,18,19,
-      20,21,22, 20,22,23,
-    ]);
-
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
 
     const vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, CUBE_VERTS, gl.STATIC_DRAW);
 
     const ebo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, CUBE_INDICES, gl.STATIC_DRAW);
 
     const stride = 8 * 4;
     gl.enableVertexAttribArray(0);
@@ -320,7 +407,7 @@
     gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 6 * 4);
 
     gl.bindVertexArray(null);
-    return { vao, count: indices.length };
+    return { vao, count: CUBE_INDICES.length };
   }
 
   function makeCanvasTexture(gl, size, drawFn, repeat = true) {
@@ -351,8 +438,10 @@
 
       this.cube = createUnitCubeMesh(this.gl);
       this.blockProg = this._createProgram(BLOCK_VS, BLOCK_FS);
+      this.staticProg = this._createProgram(STATIC_VS, STATIC_FS);
       this.skyProg = this._createProgram(SKY_VS, SKY_FS);
       this.skyVao = this.gl.createVertexArray();
+      this.staticMapCache = Object.create(null);
 
       this._cacheUniforms();
       this._createTextures();
@@ -391,6 +480,9 @@
       this.muzzleFlashTimer = 0;
       this.muzzleColor = [1, 0.85, 0.35];
       this.screenShake = 0;
+      this.viewW = window.innerWidth || 1280;
+      this.viewH = window.innerHeight || 720;
+      this._resetBlockState();
 
       this.resize();
     }
@@ -430,6 +522,7 @@
         color: gl.getUniformLocation(bp, 'uColor'),
         emissive: gl.getUniformLocation(bp, 'uEmissive'),
         alpha: gl.getUniformLocation(bp, 'uAlpha'),
+        metallic: gl.getUniformLocation(bp, 'uMetallic'),
         texMode: gl.getUniformLocation(bp, 'uTexMode'),
         camPos: gl.getUniformLocation(bp, 'uCamPos'),
         fogColor: gl.getUniformLocation(bp, 'uFogColor'),
@@ -448,6 +541,25 @@
         sunDir: gl.getUniformLocation(sp, 'uSunDir'),
         time: gl.getUniformLocation(sp, 'uTime'),
       };
+      const stp = this.staticProg;
+      this.stu = {
+        viewProj: gl.getUniformLocation(stp, 'uViewProj'),
+        tex: gl.getUniformLocation(stp, 'uTex'),
+        texMode: gl.getUniformLocation(stp, 'uTexMode'),
+        camPos: gl.getUniformLocation(stp, 'uCamPos'),
+        fogColor: gl.getUniformLocation(stp, 'uFogColor'),
+        fogDensity: gl.getUniformLocation(stp, 'uFogDensity'),
+        sunDir: gl.getUniformLocation(stp, 'uSunDir'),
+      };
+    }
+
+    _resetBlockState() {
+      this._boundTex = undefined;
+      this._lastTexMode = -1;
+      this._lastWorldUV = -1;
+      this._lastEmissive = -999;
+      this._lastAlpha = -999;
+      this._lastMetallic = -999;
     }
 
     _createTextures() {
@@ -547,17 +659,292 @@
         },
         false
       );
+
+      this._createWeaponSkinTextures();
+    }
+
+    _createWeaponSkinTextures() {
+      const gl = this.gl;
+      this.skinTextures = Object.create(null);
+
+      // 1. Asiimov — Crisp white, safety-orange & carbon-black geometric sci-fi stripes
+      this.skinTextures.asiimov = makeCanvasTexture(gl, 256, (ctx, s) => {
+        ctx.fillStyle = '#f3f5fa';
+        ctx.fillRect(0, 0, s, s);
+        // Carbon black angular plates
+        ctx.fillStyle = '#181b22';
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.72);
+        ctx.lineTo(s * 0.56, s * 0.16);
+        ctx.lineTo(s * 0.78, s * 0.16);
+        ctx.lineTo(s * 0.22, s * 0.72);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillRect(0, s * 0.86, s, s * 0.14);
+        // Vibrant safety-orange geometric chevrons
+        ctx.fillStyle = '#ff660f';
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.52);
+        ctx.lineTo(s * 0.52, 0);
+        ctx.lineTo(s * 0.72, 0);
+        ctx.lineTo(0, s * 0.72);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 0.44, s);
+        ctx.lineTo(s, s * 0.44);
+        ctx.lineTo(s, s * 0.62);
+        ctx.lineTo(s * 0.62, s);
+        ctx.closePath();
+        ctx.fill();
+        // Precision orange & black pinstripes + tech crosshair ticks
+        ctx.strokeStyle = '#ff7b24';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.28);
+        ctx.lineTo(s * 0.28, 0);
+        ctx.stroke();
+        ctx.fillStyle = '#181b22';
+        for (let i = 0; i < 6; i++) {
+          ctx.fillRect(s * 0.12 + i * 16, s * 0.77, 8, 6);
+        }
+      });
+
+      // 2. Dragon Lore — Royal gold & olive medieval scales with crimson dragon flames
+      this.skinTextures.dragonlore = makeCanvasTexture(gl, 256, (ctx, s) => {
+        const g = ctx.createLinearGradient(0, 0, s, s);
+        g.addColorStop(0, '#deb03c');
+        g.addColorStop(0.5, '#b68c2a');
+        g.addColorStop(1, '#685f2c');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        // Subtle diamond gold scales
+        ctx.strokeStyle = 'rgba(255, 232, 140, 0.26)';
+        ctx.lineWidth = 2;
+        for (let y = -32; y < s + 32; y += 24) {
+          for (let x = -32; x < s + 32; x += 24) {
+            ctx.beginPath();
+            ctx.moveTo(x, y - 12);
+            ctx.lineTo(x + 12, y);
+            ctx.lineTo(x, y + 12);
+            ctx.lineTo(x - 12, y);
+            ctx.closePath();
+            ctx.stroke();
+          }
+        }
+        // Stylized dragon flame ribbons
+        ctx.lineWidth = 18;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#991818';
+        ctx.beginPath();
+        ctx.moveTo(-20, s * 0.75);
+        ctx.bezierCurveTo(s * 0.28, s * 0.25, s * 0.65, s * 0.88, s + 20, s * 0.3);
+        ctx.stroke();
+        ctx.lineWidth = 10;
+        ctx.strokeStyle = '#ff7b14';
+        ctx.stroke();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#ffe564';
+        ctx.stroke();
+        // Celtic border stripes
+        ctx.fillStyle = '#2d2818';
+        ctx.fillRect(0, 0, s, 14);
+        ctx.fillRect(0, s - 14, s, 14);
+        ctx.fillStyle = '#f2c84b';
+        for (let x = 8; x < s; x += 20) {
+          ctx.fillRect(x, 4, 10, 6);
+          ctx.fillRect(x, s - 10, 10, 6);
+        }
+      });
+
+      // 3. Hyper Beast — Electric neon cyan, hot magenta, purple & lime beast slashes
+      this.skinTextures.hyperbeast = makeCanvasTexture(gl, 256, (ctx, s) => {
+        const g = ctx.createLinearGradient(0, 0, s, s);
+        g.addColorStop(0, '#16092c');
+        g.addColorStop(0.5, '#35105a');
+        g.addColorStop(1, '#101d3b');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        const slashes = [
+          { y0: 0.12, y1: 0.55, w: 34, col: '#14ebff' },
+          { y0: 0.34, y1: 0.8, w: 38, col: '#ff1f8f' },
+          { y0: 0.6, y1: 0.2, w: 28, col: '#8cff24' },
+          { y0: 0.82, y1: 0.42, w: 30, col: '#ff6e14' },
+          { y0: 0.05, y1: 0.92, w: 18, col: '#b83cff' },
+        ];
+        slashes.forEach((sl) => {
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = '#0c0518';
+          ctx.lineWidth = sl.w + 10;
+          ctx.beginPath();
+          ctx.moveTo(-20, s * sl.y0);
+          ctx.quadraticCurveTo(s * 0.5, s * (1 - sl.y0), s + 20, s * sl.y1);
+          ctx.stroke();
+          ctx.strokeStyle = sl.col;
+          ctx.lineWidth = sl.w;
+          ctx.stroke();
+        });
+        // Glowing beast eyes / fang accents
+        ctx.fillStyle = '#fff55c';
+        ctx.beginPath();
+        ctx.moveTo(s * 0.32, s * 0.42);
+        ctx.lineTo(s * 0.48, s * 0.34);
+        ctx.lineTo(s * 0.44, s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      });
+
+      // 4. Printstream — Sleek pearlescent white with iridescent stripes & jet-black tech markings
+      this.skinTextures.printstream = makeCanvasTexture(gl, 256, (ctx, s) => {
+        ctx.fillStyle = '#f4f6fc';
+        ctx.fillRect(0, 0, s, s);
+        // Soft pearlescent iridescent sheen bands
+        const pearl = ctx.createLinearGradient(0, 0, s, s);
+        pearl.addColorStop(0, 'rgba(110, 238, 255, 0.28)');
+        pearl.addColorStop(0.35, 'rgba(255, 255, 255, 0.0)');
+        pearl.addColorStop(0.65, 'rgba(255, 130, 220, 0.28)');
+        pearl.addColorStop(1, 'rgba(130, 255, 210, 0.26)');
+        ctx.fillStyle = pearl;
+        ctx.fillRect(0, 0, s, s);
+        // Clean jet-black tactical stripes & minimal stencil marks
+        ctx.fillStyle = '#12141c';
+        ctx.fillRect(0, s * 0.78, s, s * 0.14);
+        ctx.fillRect(s * 0.08, s * 0.12, s * 0.34, 6);
+        ctx.fillRect(s * 0.62, s * 0.66, s * 0.28, 5);
+        ctx.strokeStyle = '#12141c';
+        ctx.lineWidth = 4;
+        for (let i = 0; i < 3; i++) {
+          const cx = s * (0.24 + i * 0.22);
+          const cy = s * 0.42;
+          ctx.beginPath();
+          ctx.moveTo(cx - 10, cy - 10);
+          ctx.lineTo(cx + 10, cy + 10);
+          ctx.moveTo(cx + 10, cy - 10);
+          ctx.lineTo(cx - 10, cy + 10);
+          ctx.stroke();
+        }
+      });
+
+      // 5. Fade — Full-spectrum high-gloss purple -> magenta -> sunset gold metallic fade
+      this.skinTextures.fade = makeCanvasTexture(gl, 256, (ctx, s) => {
+        const g = ctx.createLinearGradient(0, 0, s, s * 0.45);
+        g.addColorStop(0.0, '#4420dc');
+        g.addColorStop(0.28, '#9e26eb');
+        g.addColorStop(0.54, '#ff2a92');
+        g.addColorStop(0.78, '#ff7d26');
+        g.addColorStop(1.0, '#ffd836');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        // Subtle brushed anodized sheen lines
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        for (let y = 0; y < s; y += 4) {
+          ctx.fillRect(0, y, s, 1);
+        }
+      });
+
+      // 6. Case Hardened (Blue Gem) — Swirled metallic sky-blue, royal blue, gold & violet patina
+      this.skinTextures.casehardened = makeCanvasTexture(gl, 256, (ctx, s) => {
+        ctx.fillStyle = '#c89e42';
+        ctx.fillRect(0, 0, s, s);
+        // Deterministic pseudo-random marbled Blue Gem blobs
+        const blobs = [
+          [0.2, 0.25, 0.36, '#1486ff'],
+          [0.65, 0.3, 0.4, '#0f68eb'],
+          [0.45, 0.72, 0.38, '#28aaff'],
+          [0.85, 0.78, 0.32, '#1c7cff'],
+          [0.12, 0.82, 0.26, '#7636c8'],
+          [0.52, 0.46, 0.22, '#6bd0ff'],
+          [0.78, 0.14, 0.22, '#8b3ed4'],
+          [0.32, 0.56, 0.18, '#e3b854'],
+          [0.88, 0.48, 0.16, '#d9a43c'],
+        ];
+        blobs.forEach(([bx, by, br, col]) => {
+          const rad = ctx.createRadialGradient(bx * s, by * s, br * s * 0.1, bx * s, by * s, br * s);
+          rad.addColorStop(0, col);
+          rad.addColorStop(0.7, col);
+          rad.addColorStop(1, 'rgba(180,140,60,0)');
+          ctx.fillStyle = rad;
+          ctx.fillRect(0, 0, s, s);
+        });
+        ctx.fillStyle = 'rgba(255,255,255,0.09)';
+        for (let i = 0; i < 40; i++) {
+          ctx.fillRect((i * 53) % s, (i * 37) % s, 18, 2);
+        }
+      });
+
+      // 7. Redline — Matte woven carbon-fiber grid with razor-sharp glowing crimson pinstripes
+      this.skinTextures.redline = makeCanvasTexture(gl, 256, (ctx, s) => {
+        ctx.fillStyle = '#15171d';
+        ctx.fillRect(0, 0, s, s);
+        const step = 16;
+        for (let y = 0; y < s; y += step) {
+          for (let x = 0; x < s; x += step) {
+            const odd = ((x + y) / step) % 2 === 0;
+            ctx.fillStyle = odd ? '#22252e' : '#181a21';
+            ctx.fillRect(x, y, step - 1, step - 1);
+            ctx.fillStyle = odd ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.22)';
+            ctx.fillRect(x, y, step - 1, 3);
+          }
+        }
+        // Signature twin crimson redlines
+        ctx.fillStyle = '#ff1c32';
+        ctx.fillRect(0, s * 0.38, s, 12);
+        ctx.fillStyle = '#ff5464';
+        ctx.fillRect(0, s * 0.38 + 3, s, 4);
+        ctx.fillStyle = '#d91428';
+        ctx.fillRect(0, s * 0.46, s, 5);
+      });
+
+      // 8. Doppler Ruby — Deep liquid crimson crystal facets & bright ruby ripples
+      this.skinTextures.ruby = makeCanvasTexture(gl, 256, (ctx, s) => {
+        const g = ctx.createLinearGradient(0, 0, s, s);
+        g.addColorStop(0, '#5a0414');
+        g.addColorStop(0.45, '#c40a2c');
+        g.addColorStop(0.75, '#ff2652');
+        g.addColorStop(1, '#7a051d');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        for (let i = 0; i < 6; i++) {
+          ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 110, 145, 0.38)' : 'rgba(70, 0, 15, 0.35)';
+          ctx.lineWidth = 18;
+          ctx.beginPath();
+          ctx.moveTo(-20, i * 48);
+          ctx.bezierCurveTo(s * 0.35, i * 48 - 32, s * 0.65, i * 48 + 38, s + 20, i * 48 - 10);
+          ctx.stroke();
+        }
+      });
+
+      // 9. Doppler Sapphire — Deep cosmic sapphire crystal facets & electric cyan-blue ripples
+      this.skinTextures.sapphire = makeCanvasTexture(gl, 256, (ctx, s) => {
+        const g = ctx.createLinearGradient(0, 0, s, s);
+        g.addColorStop(0, '#07165c');
+        g.addColorStop(0.45, '#1246d8');
+        g.addColorStop(0.75, '#28baff');
+        g.addColorStop(1, '#0b227a');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, s, s);
+        for (let i = 0; i < 6; i++) {
+          ctx.strokeStyle = i % 2 === 0 ? 'rgba(110, 225, 255, 0.38)' : 'rgba(5, 12, 60, 0.38)';
+          ctx.lineWidth = 18;
+          ctx.beginPath();
+          ctx.moveTo(-20, i * 48);
+          ctx.bezierCurveTo(s * 0.35, i * 48 + 34, s * 0.65, i * 48 - 34, s + 20, i * 48 + 12);
+          ctx.stroke();
+        }
+      });
     }
 
     resize() {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = Math.max(1, Math.floor(window.innerWidth * dpr));
-      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      this.viewW = Math.max(1, window.innerWidth || 1280);
+      this.viewH = Math.max(1, window.innerHeight || 720);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+      const w = Math.max(1, Math.floor(this.viewW * dpr));
+      const h = Math.max(1, Math.floor(this.viewH * dpr));
       if (this.canvas.width !== w || this.canvas.height !== h) {
         this.canvas.width = w;
         this.canvas.height = h;
+        this.gl.viewport(0, 0, w, h);
       }
-      this.gl.viewport(0, 0, w, h);
     }
 
     // --- Client-side VFX spawners ---
@@ -695,35 +1082,262 @@
       const ndcY = cy / cw;
       if (ndcX < -1.15 || ndcX > 1.15 || ndcY < -1.15 || ndcY > 1.15) return null;
       return {
-        x: (ndcX * 0.5 + 0.5) * window.innerWidth,
-        y: (1 - (ndcY * 0.5 + 0.5)) * window.innerHeight,
+        x: (ndcX * 0.5 + 0.5) * this.viewW,
+        y: (1 - (ndcY * 0.5 + 0.5)) * this.viewH,
         dist: cw,
       };
     }
 
-    _drawWithMatrix(mat, sx, sy, sz, color, texType = 4, emissive = 0, alpha = 1, worldUV = false) {
+    _appendStaticBox(buckets, mat, sx, sy, sz, color, texType, emissive, worldUV) {
+      let key = 'solid';
+      let tex = null;
+      let texMode = 3;
+      if (texType === 0) {
+        key = 'studs';
+        tex = this.texStuds;
+        texMode = 0;
+      } else if (texType === 1) {
+        key = 'crate';
+        tex = this.texCrate;
+        texMode = 1;
+      } else if (texType === 3) {
+        key = 'tile';
+        tex = this.texTile;
+        texMode = 1;
+      }
+      let bucket = buckets[key];
+      if (!bucket) {
+        bucket = buckets[key] = { tex, texMode, verts: [], indices: [], vertCount: 0 };
+      }
+
+      const baseVert = bucket.vertCount;
+      const vArr = bucket.verts;
+      const r = color[0], g = color[1], b = color[2];
+
+      for (let v = 0; v < 24; v++) {
+        const off = v * 8;
+        const lx = CUBE_VERTS[off];
+        const ly = CUBE_VERTS[off + 1];
+        const lz = CUBE_VERTS[off + 2];
+        const nx = CUBE_VERTS[off + 3];
+        const ny = CUBE_VERTS[off + 4];
+        const nz = CUBE_VERTS[off + 5];
+
+        const wx = mat[0] * lx + mat[4] * ly + mat[8] * lz + mat[12];
+        const wy = mat[1] * lx + mat[5] * ly + mat[9] * lz + mat[13];
+        const wz = mat[2] * lx + mat[6] * ly + mat[10] * lz + mat[14];
+
+        let wnx = mat[0] * nx + mat[4] * ny + mat[8] * nz;
+        let wny = mat[1] * nx + mat[5] * ny + mat[9] * nz;
+        let wnz = mat[2] * nx + mat[6] * ny + mat[10] * nz;
+        const nLen = Math.hypot(wnx, wny, wnz) || 1;
+        wnx /= nLen;
+        wny /= nLen;
+        wnz /= nLen;
+
+        let tu, tv;
+        if (worldUV) {
+          const px = (lx + 0.5) * sx;
+          const py = (ly + 0.5) * sy;
+          const pz = (lz + 0.5) * sz;
+          if (Math.abs(ny) > 0.5) {
+            tu = px;
+            tv = pz;
+          } else if (Math.abs(nx) > 0.5) {
+            tu = pz;
+            tv = py;
+          } else {
+            tu = px;
+            tv = py;
+          }
+        } else {
+          tu = CUBE_VERTS[off + 6];
+          tv = CUBE_VERTS[off + 7];
+        }
+
+        vArr.push(wx, wy, wz, wnx, wny, wnz, tu, tv, r, g, b, emissive, ny);
+      }
+
+      const iArr = bucket.indices;
+      for (let k = 0; k < 36; k++) {
+        iArr.push(baseVert + CUBE_INDICES[k]);
+      }
+      bucket.vertCount += 24;
+    }
+
+    _getStaticMapBatches(map) {
+      if (this.staticMapCache[map.id]) return this.staticMapCache[map.id];
+      const gl = this.gl;
+      const buckets = Object.create(null);
+      const mRoot = Mat4.create();
+      const mLocal = Mat4.create();
+      const mPart = Mat4.create();
+
+      // 1. Bake all static map blocks
+      const blocks = map.blocks || [];
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        Mat4.fromTRS(mRoot, b.x, b.y, b.z, 0, 0, 0, b.w, b.h, b.d);
+        this._appendStaticBox(buckets, mRoot, b.w, b.h, b.d, b.color, b.tex, b.emissive || 0, true);
+      }
+
+      // 2. Bake all static multi-part world scenery props
+      const mapProps = map.props || [];
+      const propModels = BS.MODELS && BS.MODELS.props;
+      if (propModels) {
+        for (let i = 0; i < mapProps.length; i++) {
+          const pr = mapProps[i];
+          const parts = propModels[pr.m];
+          if (!parts) continue;
+          const s = pr.s || 1;
+          const pal = pr.tint ? { tint: pr.tint } : null;
+          Mat4.fromTRS(mRoot, pr.x, pr.y, pr.z, 0, pr.ry || 0, 0, s, s, s);
+          for (let j = 0; j < parts.length; j++) {
+            const pt = parts[j];
+            const r = pt.r;
+            Mat4.fromTRS(
+              mLocal,
+              pt.p[0],
+              pt.p[1],
+              pt.p[2],
+              r ? r[0] : 0,
+              r ? r[1] : 0,
+              r ? r[2] : 0,
+              pt.s[0],
+              pt.s[1],
+              pt.s[2]
+            );
+            Mat4.multiply(mPart, mRoot, mLocal);
+            const col = this._resolvePartColor(pt.c, pal, 0);
+            this._appendStaticBox(
+              buckets,
+              mPart,
+              pt.s[0],
+              pt.s[1],
+              pt.s[2],
+              col,
+              pt.t !== undefined ? pt.t : 4,
+              pt.e || 0,
+              false
+            );
+          }
+        }
+      }
+
+      // 3. Bake static dark bases for jump pads & pickup spawners
+      const jumpPads = map.jumpPads || [];
+      for (let i = 0; i < jumpPads.length; i++) {
+        const pad = jumpPads[i];
+        Mat4.fromTRS(mRoot, pad.x, pad.y, pad.z, 0, 0, 0, 2.4, 0.22, 2.4);
+        this._appendStaticBox(buckets, mRoot, 2.4, 0.22, 2.4, [0.18, 0.22, 0.3], 4, 0, false);
+      }
+      const mapPickups = map.pickups || [];
+      for (let i = 0; i < mapPickups.length; i++) {
+        const pk = mapPickups[i];
+        Mat4.fromTRS(mRoot, pk.x, pk.y - 0.95, pk.z, 0, 0, 0, 1.1, 0.12, 1.1);
+        this._appendStaticBox(buckets, mRoot, 1.1, 0.12, 1.1, [0.12, 0.13, 0.16], 4, 0, false);
+      }
+
+      const batches = [];
+      const stride = 13 * 4;
+      for (const key of Object.keys(buckets)) {
+        const bk = buckets[key];
+        if (!bk.indices.length) continue;
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bk.verts), gl.STATIC_DRAW);
+
+        const ebo = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(bk.indices), gl.STATIC_DRAW);
+
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(1);
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * 4);
+        gl.enableVertexAttribArray(2);
+        gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 6 * 4);
+        gl.enableVertexAttribArray(3);
+        gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 8 * 4);
+        gl.enableVertexAttribArray(4);
+        gl.vertexAttribPointer(4, 2, gl.FLOAT, false, stride, 11 * 4);
+
+        gl.bindVertexArray(null);
+        batches.push({ vao, count: bk.indices.length, tex: bk.tex, texMode: bk.texMode });
+      }
+
+      this.staticMapCache[map.id] = batches;
+      return batches;
+    }
+
+    _drawWithMatrix(
+      mat,
+      sx,
+      sy,
+      sz,
+      color,
+      texType = 4,
+      emissive = 0,
+      alpha = 1,
+      worldUV = false,
+      customTex = null,
+      metallic = 0
+    ) {
       const gl = this.gl;
       gl.uniformMatrix4fv(this.u.model, false, mat);
       gl.uniform3f(this.u.color, color[0], color[1], color[2]);
-      gl.uniform1f(this.u.emissive, emissive);
-      gl.uniform1f(this.u.alpha, alpha);
-      gl.uniform3f(this.u.texScale, sx, sy, sz);
-      gl.uniform1i(this.u.useWorldUV, worldUV ? 1 : 0);
 
-      if (texType === 0) {
-        gl.bindTexture(gl.TEXTURE_2D, this.texStuds);
-        gl.uniform1i(this.u.texMode, 0);
+      if (this._lastEmissive !== emissive) {
+        this._lastEmissive = emissive;
+        gl.uniform1f(this.u.emissive, emissive);
+      }
+      if (this._lastAlpha !== alpha) {
+        this._lastAlpha = alpha;
+        gl.uniform1f(this.u.alpha, alpha);
+      }
+      if (this._lastMetallic !== metallic) {
+        this._lastMetallic = metallic;
+        gl.uniform1f(this.u.metallic, metallic);
+      }
+
+      const wuv = worldUV ? 1 : 0;
+      if (this._lastWorldUV !== wuv) {
+        this._lastWorldUV = wuv;
+        gl.uniform1i(this.u.useWorldUV, wuv);
+      }
+      if (wuv === 1) {
+        gl.uniform3f(this.u.texScale, sx, sy, sz);
+      }
+
+      let targetTex = null;
+      let texMode = 3;
+      if (customTex) {
+        targetTex = customTex;
+        texMode = 1;
+      } else if (texType === 0) {
+        targetTex = this.texStuds;
+        texMode = 0;
       } else if (texType === 1) {
-        gl.bindTexture(gl.TEXTURE_2D, this.texCrate);
-        gl.uniform1i(this.u.texMode, 1);
+        targetTex = this.texCrate;
+        texMode = 1;
       } else if (texType === 3) {
-        gl.bindTexture(gl.TEXTURE_2D, this.texTile);
-        gl.uniform1i(this.u.texMode, 1);
+        targetTex = this.texTile;
+        texMode = 1;
       } else if (texType === 5) {
-        gl.bindTexture(gl.TEXTURE_2D, this.texFace);
-        gl.uniform1i(this.u.texMode, 2);
-      } else {
-        gl.uniform1i(this.u.texMode, 3);
+        targetTex = this.texFace;
+        texMode = 2;
+      }
+
+      if (targetTex && this._boundTex !== targetTex) {
+        this._boundTex = targetTex;
+        gl.bindTexture(gl.TEXTURE_2D, targetTex);
+      }
+      if (this._lastTexMode !== texMode) {
+        this._lastTexMode = texMode;
+        gl.uniform1i(this.u.texMode, texMode);
       }
 
       gl.drawElements(gl.TRIANGLES, this.cube.count, gl.UNSIGNED_SHORT, 0);
@@ -732,6 +1346,23 @@
     _drawBox(tx, ty, tz, rx, ry, rz, sx, sy, sz, color, texType = 4, emissive = 0, alpha = 1, worldUV = false) {
       Mat4.fromTRS(this.model, tx, ty, tz, rx, ry, rz, sx, sy, sz);
       this._drawWithMatrix(this.model, sx, sy, sz, color, texType, emissive, alpha, worldUV);
+    }
+
+    _getWeaponSkinSetup(w, p) {
+      const wsMap = BS.WEAPON_SKIN_BY_ID || Object.create(null);
+      const ws = (p && p.weaponSkin && wsMap[p.weaponSkin]) || wsMap.default || null;
+      const palette = {
+        body: (ws && ws.body) || w.color,
+        accent: (ws && ws.accent) || w.accent,
+        dark: (ws && ws.dark) || [0.12, 0.13, 0.16],
+        metal: (ws && ws.metal) || [0.55, 0.58, 0.64],
+        wood: (ws && ws.wood) || [0.55, 0.34, 0.18],
+        skin: p.colors.head,
+        shirt: p.colors.torso,
+      };
+      const skinTex = ws && ws.pattern && this.skinTextures ? this.skinTextures[ws.pattern] || null : null;
+      const metallic = ws && typeof ws.metallic === 'number' ? ws.metallic : 0.15;
+      return { palette, skinTex, metallic, isBlade: w.modelType === 'blade' };
     }
 
     _resolvePartColor(c, palette, flash) {
@@ -759,6 +1390,9 @@
       const flash = opts.flash || 0;
       const emBoost = opts.emBoost || 0;
       const alphaMul = opts.alphaMul !== undefined ? opts.alphaMul : 1;
+      const skinTex = opts.skinTex || null;
+      const metallic = opts.metallic || 0;
+      const isBlade = !!opts.isBlade;
       let hasTranslucent = false;
 
       for (let i = 0; i < parts.length; i++) {
@@ -781,17 +1415,29 @@
           pt.s[2]
         );
         Mat4.multiply(this._mPart, parentMat, this._mLocal);
-        const col = this._resolvePartColor(pt.c, palette, flash);
+        const isBladeCore = isBlade && pt.s[1] > 0.5 && pt.t === 2;
+        const useSkin =
+          !!skinTex &&
+          (pt.c === 'body' ||
+            pt.c === 'wood' ||
+            (pt.c === 'metal' && metallic >= 0.72) ||
+            isBladeCore);
+        const col = isBladeCore && useSkin ? [1, 1, 1] : this._resolvePartColor(pt.c, palette, flash);
+        const em = isBladeCore && useSkin ? 0.32 + emBoost : (pt.e || 0) + emBoost;
+        const uvMult = useSkin ? 1.55 : 1.0;
+        const partMetallic = useSkin ? metallic : metallic * 0.45;
         this._drawWithMatrix(
           this._mPart,
-          pt.s[0],
-          pt.s[1],
-          pt.s[2],
+          pt.s[0] * uvMult,
+          pt.s[1] * uvMult,
+          pt.s[2] * uvMult,
           col,
           pt.t !== undefined ? pt.t : 4,
-          (pt.e || 0) + emBoost,
+          em,
           alphaMul,
-          false
+          useSkin,
+          useSkin ? skinTex : null,
+          partMetallic
         );
       }
 
@@ -829,7 +1475,9 @@
             pt.t !== undefined ? pt.t : 4,
             (pt.e || 0) + emBoost,
             pt.a * alphaMul,
-            false
+            false,
+            null,
+            metallic * 0.4
           );
         }
         gl.depthMask(true);
@@ -841,7 +1489,6 @@
       this._dt = dt;
       this.shakeTime += dt;
       this.updateVFX(dt);
-      this.resize();
       const gl = this.gl;
       const map = BS.MAPS[snapshot.mapId] || BS.MAPS.crossroads;
       const localPlayer = snapshot.players.find((p) => p.id === localId);
@@ -967,16 +1614,35 @@
       gl.uniform1f(this.su.time, snapshot.time);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      // 2. Setup 3D World Pass
+      // 2. Setup 3D World Pass — Static Batched Arena + Props (3-4 draw calls total!)
       gl.depthMask(true);
       gl.enable(gl.DEPTH_TEST);
       gl.enable(gl.CULL_FACE);
       gl.cullFace(gl.BACK);
       gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.texStuds);
 
+      const staticBatches = this._getStaticMapBatches(map);
+      gl.useProgram(this.staticProg);
+      gl.uniform1i(this.stu.tex, 0);
+      gl.uniformMatrix4fv(this.stu.viewProj, false, this.viewProj);
+      gl.uniform3fv(this.stu.camPos, this.camPos);
+      gl.uniform3fv(this.stu.fogColor, map.fogColor);
+      gl.uniform1f(this.stu.fogDensity, map.fogDensity);
+      gl.uniform3fv(this.stu.sunDir, this.sunDir);
+      for (let i = 0; i < staticBatches.length; i++) {
+        const sb = staticBatches[i];
+        gl.bindVertexArray(sb.vao);
+        if (sb.tex) gl.bindTexture(gl.TEXTURE_2D, sb.tex);
+        gl.uniform1i(this.stu.texMode, sb.texMode);
+        gl.drawElements(gl.TRIANGLES, sb.count, gl.UNSIGNED_INT, 0);
+      }
+
+      // Dynamic 3D World Entities
       gl.useProgram(this.blockProg);
       gl.bindVertexArray(this.cube.vao);
-      gl.activeTexture(gl.TEXTURE0);
+      this._resetBlockState();
       gl.uniform1i(this.u.tex, 0);
       gl.uniformMatrix4fv(this.u.viewProj, false, this.viewProj);
       gl.uniform3fv(this.u.camPos, this.camPos);
@@ -984,32 +1650,10 @@
       gl.uniform1f(this.u.fogDensity, map.fogDensity);
       gl.uniform3fv(this.u.sunDir, this.sunDir);
 
-      // Draw Map Blocks
-      const blocks = map.blocks;
-      for (let i = 0; i < blocks.length; i++) {
-        const b = blocks[i];
-        this._drawBox(b.x, b.y, b.z, 0, 0, 0, b.w, b.h, b.d, b.color, b.tex, b.emissive || 0, 1.0, true);
-      }
-
-      // Draw World Scenery Props (trees, lamps, barrels, crystals, flags, benches, rocks)
-      const mapProps = map.props || [];
-      const propModels = BS.MODELS && BS.MODELS.props;
-      if (propModels) {
-        for (let i = 0; i < mapProps.length; i++) {
-          const pr = mapProps[i];
-          const parts = propModels[pr.m];
-          if (!parts) continue;
-          const s = pr.s || 1;
-          Mat4.fromTRS(this._mRoot, pr.x, pr.y, pr.z, 0, pr.ry || 0, 0, s, s, s);
-          this._drawModel(parts, this._mRoot, pr.tint ? { tint: pr.tint } : null);
-        }
-      }
-
-      // Draw Jump Pads (pulsing glowing rings)
+      // Draw Jump Pads (pulsing glowing rings; dark bases are in static batch)
       const pulse = 0.5 + 0.5 * Math.sin(snapshot.time * 6.0);
       for (let i = 0; i < map.jumpPads.length; i++) {
         const pad = map.jumpPads[i];
-        this._drawBox(pad.x, pad.y, pad.z, 0, 0, 0, 2.4, 0.22, 2.4, [0.18, 0.22, 0.3], 4, 0);
         this._drawBox(
           pad.x,
           pad.y + 0.14,
@@ -1047,7 +1691,7 @@
         });
       }
 
-      // Draw Pickup Spawner Pads & Floating Custom Models
+      // Draw Pickup Spawner Glow Pads & Floating Custom Models (dark bases are in static batch)
       const pickupModels = BS.MODELS && BS.MODELS.pickups;
       for (let i = 0; i < snapshot.pickups.length; i++) {
         const pk = snapshot.pickups[i];
@@ -1057,7 +1701,6 @@
             : pk.type === 'shield'
             ? [0.18, 0.78, 1.0]
             : [1.0, 0.84, 0.16];
-        this._drawBox(pk.x, pk.y - 0.95, pk.z, 0, 0, 0, 1.1, 0.12, 1.1, [0.12, 0.13, 0.16], 4, 0);
         this._drawBox(pk.x, pk.y - 0.94, pk.z, 0, 0, 0, 0.8, 0.13, 0.8, padCol, 2, pk.active ? 0.9 : 0.25);
         if (!pk.active) continue;
         const bobY = pk.y + Math.sin(snapshot.time * 3.5 + i) * 0.22;
@@ -1153,8 +1796,8 @@
       // 3. Draw Crisp 1st-Person Weapon Viewmodel (depth-cleared so it never clips walls!)
       if (!isMenuDemo && localPlayer && localPlayer.alive && !this.thirdPerson) {
         const w = BS.WEAPON_BY_ID[localPlayer.weaponId] || BS.WEAPONS[0];
-        // Hide gun when fully scoped in with Railgun Sniper!
-        if (!(w.id === 'sniper' && localPlayer.ads && this.fovDeg < 42)) {
+        // Hide sniper 3D model early during scope-in so the scope tube never crosses the center reticle!
+        if (!(w.id === 'sniper' && localPlayer.ads && this.adsBlend > 0.35)) {
           this._renderViewmodel(localPlayer, w, aspect, localView);
         }
       }
@@ -1210,6 +1853,10 @@
       if (p.shield > 0) {
         this._drawChild(this._mRoot, 0, 1.07, 0, 0, 0, 0, 0.84, 0.2, 0.48, [0.18, 0.85, 1.0], 2, 0.9);
       }
+      if (p.bounty > 0) {
+        // Glowing golden Wanted aura shoulder trim on high-streak bounty targets!
+        this._drawChild(this._mRoot, 0, 1.41, 0, 0, 0, 0, 0.86, 0.07, 0.48, [1.0, 0.82, 0.18], 2, 1.0);
+      }
 
       // Head pivot + smiley face + custom Roblox accessory/hat
       Mat4.fromTRS(this._mLocal, 0, 1.43, 0, p.pitch * 0.5, 0, 0, 1, 1, 1);
@@ -1241,19 +1888,21 @@
       this._drawChild(this._mB, 0, -0.14, 0, 0, 0, 0, 0.3, 0.3, 0.32, torsoCol, 4, em);
       this._drawChild(this._mB, 0, -0.45, 0, 0, 0, 0, 0.28, 0.34, 0.3, headCol, 4, em);
 
-      // Detailed multi-part 3D world weapon held in hands
+      // Detailed multi-part 3D world weapon held in hands (with CS2 skin finish!)
       const wModel = BS.MODELS && BS.MODELS.weapons && BS.MODELS.weapons[w.id];
       if (wModel) {
+        const skinSetup = this._getWeaponSkinSetup(w, p);
         Mat4.fromTRS(this._mLocal, 0.54, 1.38, 0, p.pitch, 0, 0, 1, 1, 1);
         Mat4.multiply(this._mB, this._mRoot, this._mLocal);
         Mat4.fromTRS(this._mLocal, -0.08, -0.06, -0.58, isBlade ? -1.0 : 0, 0, 0, 1, 1, 1);
         Mat4.multiply(this._mA, this._mB, this._mLocal);
-        this._drawModel(
-          wModel.parts,
-          this._mA,
-          { body: w.color, accent: w.accent, skin: p.colors.head, shirt: p.colors.torso },
-          { flash: flash * 0.4, emBoost: em * 0.25 }
-        );
+        this._drawModel(wModel.parts, this._mA, skinSetup.palette, {
+          flash: flash * 0.4,
+          emBoost: em * 0.25,
+          skinTex: skinSetup.skinTex,
+          metallic: skinSetup.metallic,
+          isBlade: skinSetup.isBlade,
+        });
       }
     }
 
@@ -1270,33 +1919,58 @@
       gl.uniform1f(this.u.fogDensity, 0.0);
 
       // Smooth ADS transition
-      this.adsBlend += ((p.ads ? 1 : 0) - this.adsBlend) * Math.min(1, dt * 14);
+      this.adsBlend += ((p.ads ? 1 : 0) - this.adsBlend) * (1 - Math.exp(-dt * 16));
       const ads = this.adsBlend;
 
       let x = vm.vmHip[0] + (vm.vmAds[0] - vm.vmHip[0]) * ads;
       let y = vm.vmHip[1] + (vm.vmAds[1] - vm.vmHip[1]) * ads;
       let z = vm.vmHip[2] + (vm.vmAds[2] - vm.vmHip[2]) * ads;
 
-      // Damped walk bob (reduced 70% while ADS)
+      // Damped walk bob (reduced 85% while ADS so reticle view stays rock-steady)
       const amp = p.walkAmp !== undefined ? p.walkAmp : 0;
-      const bobScale = 1 - ads * 0.7;
-      x += Math.cos(p.walkPhase * 0.5) * 0.018 * amp * bobScale;
-      y -= Math.abs(Math.sin(p.walkPhase * 0.5)) * 0.022 * amp * bobScale;
+      const bobScale = 1 - ads * 0.85;
+      x += Math.cos(p.walkPhase * 0.5) * 0.016 * amp * bobScale;
+      y -= Math.abs(Math.sin(p.walkPhase * 0.5)) * 0.018 * amp * bobScale;
 
-      // Smooth mouse sway
-      const swayX = (localView && localView.swayX) || 0;
-      const swayY = (localView && localView.swayY) || 0;
-      x += swayX * 0.6;
-      y += swayY * 0.6;
+      // Smooth mouse sway (reduced while ADS)
+      const swayAds = 1 - ads * 0.65;
+      const swayX = ((localView && localView.swayX) || 0) * swayAds;
+      const swayY = ((localView && localView.swayY) || 0) * swayAds;
+      x += swayX * 0.55;
+      y += swayY * 0.55;
 
       let rx = vm.vmRot ? vm.vmRot[0] : 0;
-      let ry = (vm.vmRot ? vm.vmRot[1] : 0) - swayX * 1.5;
-      let rz = (vm.vmRot ? vm.vmRot[2] : 0) + swayX * 2.0;
+      let ry = (vm.vmRot ? vm.vmRot[1] : 0) - swayX * 1.4;
+      let rz = (vm.vmRot ? vm.vmRot[2] : 0) + swayX * 1.8;
 
-      // Recoil kick (halved when ADS) & reload dip
-      const recScale = 1 - ads * 0.5;
-      z += p.recoilKick * 0.12 * recScale;
-      rx += p.recoilKick * 0.22 * recScale;
+      // Snappy weapon equip raise animation on slot switch
+      const equipDip = (localView && localView.equipDip) || 0;
+      if (equipDip > 0) {
+        y -= equipDip * 0.24;
+        rx -= equipDip * 0.55;
+        rz += equipDip * 0.25;
+      }
+
+      // CS2-style Weapon Inspect animation ([F] key)
+      const insp = (localView && localView.inspectProgress) || 0;
+      if (insp > 0 && ads < 0.25) {
+        const env =
+          Math.sin(Math.min(1, insp * 4.5) * Math.PI * 0.5) *
+          Math.sin(Math.min(1, (1 - insp) * 4.5) * Math.PI * 0.5) *
+          (1 - ads * 4);
+        x -= 0.16 * env;
+        y += 0.07 * env;
+        z += 0.04 * env;
+        ry -= env * (1.02 + Math.sin(insp * Math.PI * 2) * 0.34);
+        rx += env * 0.22;
+        rz -= env * 0.34;
+      }
+
+      // Recoil kick: kicks straight back (+Z) when ADS without pitching gun up over target!
+      const zRecScale = 1 - ads * 0.45;
+      const pitchRecScale = 1 - ads * 0.85;
+      z += p.recoilKick * 0.11 * zRecScale;
+      rx += p.recoilKick * 0.18 * pitchRecScale;
 
       if (p.reloading) {
         const dip = Math.sin(p.reloadProgress * Math.PI);
@@ -1312,13 +1986,12 @@
 
       Mat4.fromTRS(this._mRoot, x, y, z, rx, ry, rz, 1, 1, 1);
 
-      const palette = {
-        body: w.color,
-        accent: w.accent,
-        skin: p.colors.head,
-        shirt: p.colors.torso,
-      };
-      this._drawModel(vm.parts, this._mRoot, palette);
+      const skinSetup = this._getWeaponSkinSetup(w, p);
+      this._drawModel(vm.parts, this._mRoot, skinSetup.palette, {
+        skinTex: skinSetup.skinTex,
+        metallic: skinSetup.metallic,
+        isBlade: skinSetup.isBlade,
+      });
 
       // Right hand & sleeve gripping weapon
       this._drawChild(this._mRoot, 0, -0.06, 0.05, 0, 0, 0, 0.09, 0.1, 0.14, p.colors.head, 4, 0);

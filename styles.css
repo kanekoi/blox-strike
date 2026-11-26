@@ -1,9 +1,9 @@
 /* Blox Strike — Modern Roblox-Inspired Arcade Shooter UI */
 
 :root {
-  --bg-glass: rgba(11, 16, 29, 0.78);
-  --bg-glass-strong: rgba(11, 16, 29, 0.92);
-  --border-glass: rgba(255, 255, 255, 0.14);
+  --bg-glass: rgba(10, 15, 28, 0.88);
+  --bg-glass-strong: rgba(9, 14, 26, 0.95);
+  --border-glass: rgba(255, 255, 255, 0.15);
   --cyan: #24d2ff;
   --blue: #2986ff;
   --red: #ff3e55;
@@ -58,16 +58,16 @@ html, body {
   z-index: 8;
   opacity: 0;
   background: radial-gradient(circle at center, transparent 48%, rgba(255, 32, 60, 0.72) 100%);
-  transition: opacity 0.06s linear;
+  will-change: opacity;
 }
 
-/* Sniper Scope Overlay */
+/* Sniper Scope Overlay (wide-open clear viewport + razor-thin reticle so sights never obstruct!) */
 #sniper-scope {
   position: fixed;
   inset: 0;
   z-index: 9;
   pointer-events: none;
-  background: radial-gradient(circle at center, transparent 32%, rgba(5, 8, 16, 0.98) 33%);
+  background: radial-gradient(circle at center, transparent 41%, rgba(5, 8, 16, 0.94) 42.5%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,37 +75,38 @@ html, body {
 
 .scope-ring {
   position: relative;
-  width: min(64vh, 64vw);
-  height: min(64vh, 64vw);
+  width: min(80vh, 80vw);
+  height: min(80vh, 80vw);
   border-radius: 50%;
-  border: 3px solid rgba(175, 110, 255, 0.85);
-  box-shadow: 0 0 32px rgba(155, 90, 255, 0.45), inset 0 0 24px rgba(155, 90, 255, 0.2);
+  border: 2px solid rgba(175, 110, 255, 0.72);
+  box-shadow: 0 0 28px rgba(155, 90, 255, 0.35);
 }
 
 .scope-h, .scope-v {
   position: absolute;
-  background: rgba(220, 200, 255, 0.72);
+  background: rgba(220, 205, 255, 0.45);
 }
-.scope-h { left: 0; right: 0; top: 50%; height: 1.5px; transform: translateY(-50%); }
-.scope-v { top: 0; bottom: 0; left: 50%; width: 1.5px; transform: translateX(-50%); }
+.scope-h { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); }
+.scope-v { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
 .scope-dot {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: #ff3e55;
-  box-shadow: 0 0 10px #ff3e55;
+  box-shadow: 0 0 8px #ff3e55;
   transform: translate(-50%, -50%);
 }
 
-/* --- HUD --- */
+/* --- HUD (zero backdrop-filter blur to prevent GPU compositor readback stalls over WebGL!) --- */
 #hud {
   position: fixed;
   inset: 0;
   z-index: 12;
   pointer-events: none;
+  contain: layout style;
 }
 
 .hud-top-left {
@@ -145,7 +146,6 @@ html, body {
   font-weight: 800;
   letter-spacing: 0.08em;
   color: #bfefff;
-  backdrop-filter: blur(8px);
 }
 
 .net-dot {
@@ -172,7 +172,6 @@ html, body {
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(10px);
 }
 
 .score-side {
@@ -237,7 +236,6 @@ html, body {
   border: 1px solid var(--border-glass);
   font-size: 12px;
   font-weight: 800;
-  backdrop-filter: blur(6px);
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
@@ -389,13 +387,61 @@ html, body {
   box-shadow: 0 0 14px rgba(255, 212, 59, 0.35);
 }
 
+.mini-pill.bounty {
+  border-color: #ff9f1c;
+  background: rgba(44, 24, 6, 0.92);
+  color: #ffd43b;
+  box-shadow: 0 0 14px rgba(255, 168, 28, 0.42);
+}
+
+.xp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.level-badge {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #ffd43b, #ff922b);
+  color: #0b101d;
+  font-size: 10.5px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.xp-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.xp-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #a855f7, #24d2ff, #ffd43b);
+  transition: width 0.16s ease-out;
+}
+
+.xp-label {
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #d0dcff;
+  white-space: nowrap;
+}
+
 .stat-card {
   width: 268px;
   padding: 12px 14px;
   border-radius: var(--radius);
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
-  backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -472,6 +518,7 @@ html, body {
   transform: translateX(-50%);
   display: flex;
   gap: 7px;
+  pointer-events: auto;
 }
 
 .hotbar-slot {
@@ -480,12 +527,12 @@ html, body {
   border-radius: 11px;
   background: var(--bg-glass);
   border: 2px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   position: relative;
+  cursor: pointer;
   transition: transform 0.12s, border-color 0.12s, background 0.12s;
 }
 
@@ -556,10 +603,22 @@ html, body {
   border-radius: var(--radius);
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
-  backdrop-filter: blur(10px);
   text-align: right;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
 }
+
+.weapon-skin-badge {
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 1px;
+  opacity: 0.92;
+}
+.weapon-skin-badge.rarity-standard { color: var(--muted); }
+.weapon-skin-badge.rarity-classified { color: #e86bff; }
+.weapon-skin-badge.rarity-covert { color: #ff5b69; }
+.weapon-skin-badge.rarity-gem { color: var(--gold); text-shadow: 0 0 10px rgba(255, 212, 59, 0.55); }
 
 .weapon-name {
   font-size: 12px;
@@ -633,7 +692,6 @@ html, body {
   font-size: 13px;
   font-weight: 900;
   letter-spacing: 0.14em;
-  backdrop-filter: blur(10px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 18px rgba(36, 210, 255, 0.25);
   pointer-events: none;
   animation: ctpPulse 1.6s ease-in-out infinite;
@@ -832,20 +890,31 @@ html, body {
 .skin-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 5px 9px;
   border-radius: 9px;
   border: 1.5px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
   color: #e6eeff;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.1s;
 }
+
+.skin-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.skin-chip.rarity-classified { border-color: rgba(211, 44, 230, 0.45); }
+.skin-chip.rarity-covert { border-color: rgba(235, 75, 75, 0.5); }
+.skin-chip.rarity-gem { border-color: rgba(255, 212, 59, 0.58); }
 
 .skin-chip.active {
   border-color: var(--gold);
-  background: rgba(255, 212, 59, 0.14);
+  background: rgba(255, 212, 59, 0.16);
+  box-shadow: 0 0 12px rgba(255, 212, 59, 0.22);
   color: #fff;
 }
 

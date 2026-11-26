@@ -58,26 +58,24 @@
       this.sim.setPlayerInput(this.localPlayerId, cmd);
     }
 
-    // Advance authoritative local simulation using fixed 60Hz timestep
+    // Advance authoritative local simulation synchronized to exact display frame dt
+    // (sub-divided to <= FIXED_DT so AABB physics stays rock-solid with zero VSync beat jitter or 1-tick lag!)
     stepFrame(dt) {
-      const clamped = Math.min(dt, 0.1);
-      this.accumulator += clamped;
-      let stepped = false;
-      while (this.accumulator >= BS.FIXED_DT) {
-        this.prevState = this.sim.captureInterpState();
-        const events = this.sim.step(BS.FIXED_DT);
+      const clamped = Math.min(Math.max(dt, 0), 0.05);
+      if (clamped <= 0) return;
+      const steps = Math.max(1, Math.ceil(clamped / BS.FIXED_DT));
+      const subDt = clamped / steps;
+      for (let s = 0; s < steps; s++) {
+        const events = this.sim.step(subDt);
         if (events && events.length) {
           for (let i = 0; i < events.length; i++) {
             this._emitEvent(events[i]);
           }
         }
-        this.accumulator -= BS.FIXED_DT;
-        stepped = true;
       }
-      this.alpha = this.accumulator / BS.FIXED_DT;
-      if (stepped) {
-        this._emitSnapshot();
-      }
+      this.prevState = null;
+      this.alpha = 1;
+      this._emitSnapshot();
     }
 
     getInterpolation() {
@@ -113,19 +111,73 @@
     }
   }
 
+  function sanitizeOutgoingInput(cmd) {
+    if (!cmd || typeof cmd !== 'object') return null;
+    const num = (v, fb = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : fb);
+    const slot =
+      Number.isInteger(cmd.weaponSlot) && cmd.weaponSlot >= 1 && cmd.weaponSlot <= BS.WEAPONS.length
+        ? cmd.weaponSlot
+        : null;
+    return {
+      seq: Number.isInteger(cmd.seq) && cmd.seq >= 0 ? cmd.seq : 0,
+      moveX: Math.max(-1, Math.min(1, num(cmd.moveX, 0))),
+      moveZ: Math.max(-1, Math.min(1, num(cmd.moveZ, 0))),
+      yaw: num(cmd.yaw, 0),
+      pitch: Math.max(-1.48, Math.min(1.48, num(cmd.pitch, 0))),
+      jump: !!cmd.jump,
+      dash: !!cmd.dash,
+      fire: !!cmd.fire,
+      ads: !!cmd.ads,
+      reload: !!cmd.reload,
+      weaponSlot: slot,
+    };
+  }
+
+  function safeParsePacket(raw) {
+    if (typeof raw !== 'string') return null;
+    const maxBytes = (BS.SECURITY && BS.SECURITY.MAX_PACKET_BYTES) || 65536;
+    if (raw.length > maxBytes) return null;
+    try {
+      const parsed = JSON.parse(raw, (key, val) => {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;
+        return val;
+      });
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      if (typeof parsed.type !== 'string' || parsed.type.length > 32) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function isAllowedWsUrl(url) {
+    if (typeof url !== 'string') return false;
+    try {
+      const u = new URL(url);
+      return u.protocol === 'ws:' || u.protocol === 'wss:';
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Drop-in WebSocketTransport template for future online multiplayer.
    * Run js/config.js + js/sim.js inside Node.js (ws / uWebSockets / PartyKit)
-   * and point this transport at ws://your-server:port to play online!
+   * and point this transport at wss://your-server:port to play online!
    */
   class WebSocketTransport {
     constructor(url) {
+      if (!isAllowedWsUrl(url)) {
+        throw new Error('WebSocketTransport requires a valid ws:// or wss:// URL.');
+      }
       this.url = url;
       this.ws = null;
       this.mode = 'REMOTE_WS';
       this.localPlayerId = null;
       this.snapshotListeners = [];
       this.eventListeners = [];
+      this.droppedPackets = 0;
+      this.lastSendTime = 0;
       this.stats = { tickRate: BS.TICK_RATE, pingMs: 0, packetsPerSec: 0 };
     }
 
@@ -133,17 +185,41 @@
       return new Promise((resolve, reject) => {
         this.ws = new WebSocket(this.url);
         this.ws.onopen = () => {
-          this.ws.send(JSON.stringify({ type: 'join', options }));
+          const safeOpts = options && typeof options === 'object' ? {
+            mapId: typeof options.mapId === 'string' ? options.mapId : 'crossroads',
+            modeId: typeof options.modeId === 'string' ? options.modeId : 'tdm',
+            playerName: typeof options.playerName === 'string' ? options.playerName.slice(0, 16) : 'BloxPlayer',
+            skinId: typeof options.skinId === 'string' ? options.skinId : 'classic',
+            accessoryId: typeof options.accessoryId === 'string' ? options.accessoryId : 'auto',
+            weaponSkinId: typeof options.weaponSkinId === 'string' ? options.weaponSkinId : 'default',
+          } : {};
+          this.ws.send(JSON.stringify({ type: 'join', options: safeOpts }));
         };
         this.ws.onmessage = (msg) => {
-          const data = JSON.parse(msg.data);
-          if (data.type === 'welcome') {
+          const data = safeParsePacket(msg && msg.data);
+          if (!data) {
+            this.droppedPackets++;
+            return;
+          }
+          if (data.type === 'welcome' && typeof data.playerId === 'string' && data.playerId.length <= 48) {
             this.localPlayerId = data.playerId;
             resolve({ playerId: this.localPlayerId, mode: this.mode });
-          } else if (data.type === 'snapshot') {
+          } else if (
+            data.type === 'snapshot' &&
+            data.payload &&
+            typeof data.payload === 'object' &&
+            Array.isArray(data.payload.players)
+          ) {
             this.snapshotListeners.forEach((cb) => cb(data.payload));
-          } else if (data.type === 'event') {
+          } else if (
+            data.type === 'event' &&
+            data.payload &&
+            typeof data.payload === 'object' &&
+            typeof data.payload.type === 'string'
+          ) {
             this.eventListeners.forEach((cb) => cb(data.payload));
+          } else {
+            this.droppedPackets++;
           }
         };
         this.ws.onerror = (err) => reject(err);
@@ -151,9 +227,14 @@
     }
 
     sendInput(cmd) {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'input', payload: cmd }));
-      }
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      // Client-side rate limit (~65Hz max) to avoid spamming remote server
+      if (now - this.lastSendTime < 15 && !cmd.dash && !cmd.reload && cmd.weaponSlot === null) return;
+      const clean = sanitizeOutgoingInput(cmd);
+      if (!clean) return;
+      this.lastSendTime = now;
+      this.ws.send(JSON.stringify({ type: 'input', payload: clean }));
     }
 
     stepFrame() {
@@ -183,4 +264,6 @@
 
   BS.LocalLoopbackTransport = LocalLoopbackTransport;
   BS.WebSocketTransport = WebSocketTransport;
+  BS.safeParsePacket = safeParsePacket;
+  BS.isAllowedWsUrl = isAllowedWsUrl;
 })(window);

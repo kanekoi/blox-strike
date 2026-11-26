@@ -8,6 +8,21 @@
     return v < lo ? lo : v > hi ? hi : v;
   }
 
+  function hasOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+  }
+
+  function sanitizeName(raw) {
+    if (typeof raw !== 'string') return 'BloxPlayer';
+    const maxLen = (BS.SECURITY && BS.SECURITY.MAX_NAME_LEN) || 16;
+    const cleaned = raw
+      .replace(/[\u0000-\u001F\u007F<>"'`&\\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLen);
+    return cleaned || 'BloxPlayer';
+  }
+
   function lerpAngle(a, b, t) {
     let diff = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
     if (diff < -Math.PI) diff += Math.PI * 2;
@@ -77,7 +92,7 @@
       this.mode = BS.MODES.tdm;
       this.difficulty = 'medium';
       this.players = [];
-      this.playerMap = {};
+      this.playerMap = Object.create(null);
       this.projectiles = [];
       this.pickups = [];
       this.blocks = [];
@@ -90,18 +105,25 @@
       this.winner = null;
       this.nextProjId = 1;
       this.events = [];
+      this.droppedInputs = 0;
     }
 
     startMatch(options = {}) {
-      const mapId = options.mapId || 'crossroads';
-      const modeId = options.modeId || 'tdm';
-      const botCount = clamp(options.botCount !== undefined ? options.botCount : 7, 1, 11);
-      const playerName = (options.playerName || 'BloxPlayer').trim().slice(0, 16) || 'BloxPlayer';
-      const playerSkinId = options.skinId || 'classic';
-      this.difficulty = options.difficulty || 'medium';
+      const opts = options && typeof options === 'object' ? options : {};
+      const mapId = typeof opts.mapId === 'string' && hasOwn(BS.MAPS, opts.mapId) ? opts.mapId : 'crossroads';
+      const modeId = typeof opts.modeId === 'string' && hasOwn(BS.MODES, opts.modeId) ? opts.modeId : 'tdm';
+      const maxBots = (BS.SECURITY && BS.SECURITY.MAX_BOTS) || 11;
+      const rawBots = Number.isFinite(opts.botCount) ? Math.floor(opts.botCount) : 7;
+      const botCount = clamp(rawBots, 0, maxBots);
+      const playerName = sanitizeName(opts.playerName);
+      const playerSkinId = typeof opts.skinId === 'string' ? opts.skinId : 'classic';
+      this.difficulty =
+        opts.difficulty === 'easy' || opts.difficulty === 'hard' || opts.difficulty === 'medium'
+          ? opts.difficulty
+          : 'medium';
 
-      this.map = BS.MAPS[mapId] || BS.MAPS.crossroads;
-      this.mode = BS.MODES[modeId] || BS.MODES.tdm;
+      this.map = BS.MAPS[mapId];
+      this.mode = BS.MODES[modeId];
 
       // Precompute block AABBs
       this.blocks = this.map.blocks.map((b) => ({
@@ -149,7 +171,7 @@
       }));
 
       this.players = [];
-      this.playerMap = {};
+      this.playerMap = Object.create(null);
       this.projectiles = [];
       this.events = [];
       this.tick = 0;
@@ -160,26 +182,34 @@
       this.timeLeft = this.mode.timeLimit;
       this.matchOver = false;
       this.winner = null;
+      this.droppedInputs = 0;
 
       // Add local human player (or AI bot in menu demoMode)
       const localSkin = BS.SKINS.find((s) => s.id === playerSkinId) || BS.SKINS[0];
       const accessoryIds = BS.ACCESSORY_IDS || [];
       const localAcc =
-        options.accessoryId && options.accessoryId !== 'auto' && accessoryIds.includes(options.accessoryId)
-          ? options.accessoryId
+        typeof opts.accessoryId === 'string' && opts.accessoryId !== 'auto' && accessoryIds.includes(opts.accessoryId)
+          ? opts.accessoryId
           : localSkin.accessory || 'hair_classic';
+      const weaponSkinMap = BS.WEAPON_SKIN_BY_ID || Object.create(null);
+      const weaponSkinIds = BS.WEAPON_SKIN_IDS || ['default'];
+      const localWeaponSkin =
+        typeof opts.weaponSkinId === 'string' && weaponSkinMap[opts.weaponSkinId]
+          ? opts.weaponSkinId
+          : 'default';
       const localTeam = this.mode.teams ? 'blue' : 'ffa';
       const localPlayer = this._createPlayer(
         this.localPlayerId,
         playerName,
         localTeam,
-        !!options.demoMode,
+        !!opts.demoMode,
         localSkin,
-        localAcc
+        localAcc,
+        localWeaponSkin
       );
       this._addPlayer(localPlayer);
 
-      // Add AI bots
+      // Add AI bots (each bot can use ANY weapon and rocks a random CS2 weapon finish!)
       const names = BS.BOT_NAMES.slice().sort(() => Math.random() - 0.5);
       for (let i = 0; i < botCount; i++) {
         let team = 'ffa';
@@ -193,7 +223,16 @@
         const botAcc = accessoryIds.length
           ? accessoryIds[Math.floor(Math.random() * accessoryIds.length)]
           : skin.accessory || 'hair_classic';
-        const bot = this._createPlayer('bot_' + (i + 1), names[i % names.length], team, true, skin, botAcc);
+        const botWeaponSkin = weaponSkinIds[Math.floor(Math.random() * weaponSkinIds.length)];
+        const bot = this._createPlayer(
+          'bot_' + (i + 1),
+          names[i % names.length],
+          team,
+          true,
+          skin,
+          botAcc,
+          botWeaponSkin
+        );
         this._addPlayer(bot);
       }
 
@@ -201,12 +240,13 @@
       this.players.forEach((p, idx) => this._spawnPlayer(p, idx));
     }
 
-    _createPlayer(id, name, team, isBot, skin, accessory) {
-      const ammo = {};
+    _createPlayer(id, name, team, isBot, skin, accessory, weaponSkin) {
+      const ammo = Object.create(null);
       BS.WEAPONS.forEach((w) => {
         ammo[w.id] = w.magSize;
       });
       const colors = this._resolveColors(team, skin);
+      const randomWeapon = BS.WEAPONS[Math.floor(Math.random() * BS.WEAPONS.length)].id;
       return {
         id,
         name,
@@ -214,6 +254,7 @@
         isBot,
         colors,
         accessory: accessory || (skin && skin.accessory) || 'hair_classic',
+        weaponSkin: weaponSkin || 'default',
         x: 0,
         y: 2,
         z: 0,
@@ -227,6 +268,7 @@
         coyote: 0,
         jumpBuffer: 0,
         hp: BS.PLAYER.MAX_HP,
+        maxHp: BS.PLAYER.MAX_HP,
         shield: 0,
         alive: true,
         respawnTimer: 0,
@@ -236,6 +278,7 @@
         fireCooldown: 0,
         reloading: false,
         reloadTimer: 0,
+        reloadDuration: 1.45,
         dashTimer: 0,
         dashCooldown: 0,
         dashDirX: 0,
@@ -250,8 +293,16 @@
         streak: 0,
         bestStreak: 0,
         score: 0,
+        level: 1,
+        xp: 0,
+        xpToNext: (BS.PROGRESSION && BS.PROGRESSION.BASE_LEVEL_XP) || 100,
+        bounty: 0,
+        xpAccum: 0,
         gunGameTier: 0,
         gunGameTierKills: 0,
+        inputWindowTick: 0,
+        inputWindowTime: 0,
+        inputWindowCount: 0,
         input: {
           seq: 0,
           moveX: 0,
@@ -278,7 +329,8 @@
               stuckTimer: 0,
               lastX: 0,
               lastZ: 0,
-              desiredWeapon: BS.WEAPONS[Math.floor(Math.random() * 4)].id,
+              desiredWeapon: randomWeapon,
+              weaponSwitchTimer: 3.5 + Math.random() * 5.0,
             }
           : null,
       };
@@ -312,13 +364,33 @@
     }
 
     setPlayerInput(playerId, cmd) {
+      if (typeof playerId !== 'string' || !hasOwn(this.playerMap, playerId)) return false;
+      if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd)) return false;
       const p = this.playerMap[playerId];
-      if (!p) return;
-      p.input.seq = cmd.seq || 0;
-      p.input.moveX = clamp(cmd.moveX || 0, -1, 1);
-      p.input.moveZ = clamp(cmd.moveZ || 0, -1, 1);
-      if (typeof cmd.yaw === 'number' && !Number.isNaN(cmd.yaw)) p.input.yaw = cmd.yaw;
-      if (typeof cmd.pitch === 'number' && !Number.isNaN(cmd.pitch)) {
+      if (!p) return false;
+
+      // Authoritative per-player input flood protection (supports up to 360Hz displays while blocking packet-spam DoS)
+      const maxInputs = (BS.SECURITY && BS.SECURITY.MAX_INPUTS_PER_SEC) || 360;
+      if (this.time - p.inputWindowTime >= 1.0 || this.tick - p.inputWindowTick >= BS.TICK_RATE) {
+        p.inputWindowTime = this.time;
+        p.inputWindowTick = this.tick;
+        p.inputWindowCount = 0;
+      }
+      if (p.inputWindowCount >= maxInputs) {
+        this.droppedInputs++;
+        return false;
+      }
+      p.inputWindowCount++;
+
+      if (Number.isInteger(cmd.seq) && cmd.seq >= 0) {
+        p.input.seq = cmd.seq;
+      }
+      p.input.moveX = Number.isFinite(cmd.moveX) ? clamp(cmd.moveX, -1, 1) : 0;
+      p.input.moveZ = Number.isFinite(cmd.moveZ) ? clamp(cmd.moveZ, -1, 1) : 0;
+      if (typeof cmd.yaw === 'number' && Number.isFinite(cmd.yaw)) {
+        p.input.yaw = Math.abs(cmd.yaw) > 1e6 ? cmd.yaw % (Math.PI * 2) : cmd.yaw;
+      }
+      if (typeof cmd.pitch === 'number' && Number.isFinite(cmd.pitch)) {
         p.input.pitch = clamp(cmd.pitch, -1.48, 1.48);
       }
       p.input.jump = !!cmd.jump;
@@ -326,9 +398,10 @@
       p.input.fire = !!cmd.fire;
       p.input.ads = !!cmd.ads;
       if (cmd.reload) p.input.reload = true;
-      if (cmd.weaponSlot !== undefined && cmd.weaponSlot !== null) {
+      if (Number.isInteger(cmd.weaponSlot) && cmd.weaponSlot >= 1 && cmd.weaponSlot <= BS.WEAPONS.length) {
         p.input.weaponSlot = cmd.weaponSlot;
       }
+      return true;
     }
 
     _spawnPlayer(p, fallbackIndex = 0) {
@@ -374,7 +447,7 @@
       p.pitch = 0;
       p.input.yaw = best.yaw;
       p.input.pitch = 0;
-      p.hp = BS.PLAYER.MAX_HP;
+      p.hp = p.maxHp || BS.PLAYER.MAX_HP;
       p.shield = 0;
       p.alive = true;
       p.respawnTimer = 0;
@@ -401,6 +474,10 @@
         const w = BS.WEAPONS[clamp(p.gunGameTier, 0, BS.WEAPONS.length - 1)];
         p.weaponId = w.id;
       } else if (p.isBot && p.ai) {
+        // Bots freely rotate through ALL 6 weapons on respawn!
+        if (Math.random() < 0.6) {
+          p.ai.desiredWeapon = BS.WEAPONS[Math.floor(Math.random() * BS.WEAPONS.length)].id;
+        }
         p.weaponId = p.ai.desiredWeapon;
       }
     }
@@ -439,6 +516,8 @@
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         if (!p.alive) {
+          // Allow human players to select their next weapon even during respawn countdown!
+          if (!p.isBot) this._applyWeaponSlotSwitch(p);
           p.respawnTimer -= dt;
           if (p.respawnTimer <= 0) {
             this._spawnPlayer(p, i);
@@ -515,6 +594,8 @@
       }
 
       let speed = BS.PLAYER.MOVE_SPEED;
+      const lvlTiers = Math.min(9, Math.max(0, (p.level || 1) - 1));
+      if (lvlTiers > 0) speed *= 1 + lvlTiers * 0.014;
       if (inp.ads) speed *= BS.PLAYER.ADS_SPEED_MULT;
       if (p.weaponId === 'blade') speed *= 1.15;
       if (p.speedBoostTimer > 0) speed *= 1.38;
@@ -590,12 +671,12 @@
       }
       p.wasGrounded = p.grounded;
 
-      // Walk animation phase (monotonic phase, smoothed walkAmp so stopping never jitters!)
+      // Walk animation phase (monotonic phase, exponential walkAmp so stopping never jitters at any FPS!)
       const horizSpeed = Math.hypot(p.vx, p.vz);
       if (p.grounded && horizSpeed > 0.8) {
-        p.walkAmp += (1 - p.walkAmp) * Math.min(1, dt * 10);
+        p.walkAmp += (1 - p.walkAmp) * (1 - Math.exp(-10 * dt));
       } else {
-        p.walkAmp += (0 - p.walkAmp) * Math.min(1, dt * 8);
+        p.walkAmp += (0 - p.walkAmp) * (1 - Math.exp(-8 * dt));
       }
       if (p.walkAmp > 0.01) {
         p.walkPhase += dt * horizSpeed * 1.45;
@@ -678,24 +759,30 @@
       return true;
     }
 
-    _updatePlayerCombat(p, dt) {
+    _applyWeaponSlotSwitch(p) {
       const inp = p.input;
-
-      // Weapon switching (disabled in Gun Game since tier dictates weapon)
       if (this.mode.id !== 'gungame' && inp.weaponSlot !== null) {
         const w = BS.WEAPONS.find((item) => item.slot === inp.weaponSlot);
         if (w && w.id !== p.weaponId) {
           p.weaponId = w.id;
           p.reloading = false;
           p.reloadTimer = 0;
-          p.fireCooldown = Math.max(p.fireCooldown, 0.14);
+          p.fireCooldown = Math.max(p.fireCooldown, 0.07);
+          this.events.push({ type: 'weaponSwitch', playerId: p.id, weaponId: w.id, slot: w.slot });
         }
         inp.weaponSlot = null;
       }
+    }
+
+    _updatePlayerCombat(p, dt) {
+      const inp = p.input;
+
+      // Weapon switching (disabled in Gun Game since tier dictates weapon)
+      this._applyWeaponSlotSwitch(p);
 
       const w = BS.WEAPON_BY_ID[p.weaponId] || BS.WEAPONS[0];
 
-      // Handle Reload
+      // Handle Reload (scales 3% faster per level above 1!)
       if (p.reloading) {
         p.reloadTimer -= dt;
         if (p.reloadTimer <= 0) {
@@ -707,8 +794,11 @@
         (inp.reload || p.ammo[w.id] <= 0) &&
         p.ammo[w.id] < w.magSize
       ) {
+        const lvlTiers = Math.min(9, Math.max(0, (p.level || 1) - 1));
+        const reloadDur = w.reloadTime / (1 + lvlTiers * 0.03);
         p.reloading = true;
-        p.reloadTimer = w.reloadTime;
+        p.reloadTimer = reloadDur;
+        p.reloadDuration = reloadDur;
         this.events.push({ type: 'reload', playerId: p.id, weaponId: w.id });
       }
 
@@ -796,23 +886,25 @@
       }
 
       if (w.type === 'projectile') {
-        // Spawn Brick-RPG rocket!
-        const proj = {
-          id: this.nextProjId++,
-          ownerId: p.id,
-          weaponId: w.id,
-          x: ox + baseDx * 0.75,
-          y: oy + baseDy * 0.75 - 0.08,
-          z: oz + baseDz * 0.75,
-          vx: baseDx * w.projSpeed,
-          vy: baseDy * w.projSpeed,
-          vz: baseDz * w.projSpeed,
-          life: 4.5,
-          splashRadius: w.splashRadius,
-          damage: w.damage,
-          knockback: w.knockback,
-        };
-        this.projectiles.push(proj);
+        // Hard cap active projectiles to prevent entity-flood DoS
+        if (this.projectiles.length < 48) {
+          const proj = {
+            id: this.nextProjId++,
+            ownerId: p.id,
+            weaponId: w.id,
+            x: ox + baseDx * 0.75,
+            y: oy + baseDy * 0.75 - 0.08,
+            z: oz + baseDz * 0.75,
+            vx: baseDx * w.projSpeed,
+            vy: baseDy * w.projSpeed,
+            vz: baseDz * w.projSpeed,
+            life: 4.5,
+            splashRadius: w.splashRadius,
+            damage: w.damage,
+            knockback: w.knockback,
+          };
+          this.projectiles.push(proj);
+        }
         this.events.push({
           type: 'shoot',
           shooterId: p.id,
@@ -828,7 +920,7 @@
       // Hitscan weapon (AR, SMG, Shotgun, Railgun Sniper)
       const spread = p.input.ads ? w.adsSpread : w.spread;
       const hits = [];
-      const dmgAccum = {};
+      const dmgAccum = Object.create(null);
 
       for (let k = 0; k < w.pellets; k++) {
         const rx = (Math.random() - 0.5) * 2 * spread;
@@ -1075,14 +1167,55 @@
       }
     }
 
+    _xpRequiredForLevel(level) {
+      const cfg = BS.PROGRESSION || {};
+      const base = cfg.BASE_LEVEL_XP || 100;
+      const step = cfg.XP_PER_LEVEL_STEP || 35;
+      return base + Math.max(0, level - 1) * step;
+    }
+
+    _grantXP(p, amount, reason = 'kill') {
+      if (!p || amount <= 0) return;
+      const maxLvl = (BS.PROGRESSION && BS.PROGRESSION.MAX_LEVEL) || 25;
+      if (p.level >= maxLvl) return;
+      p.xp += amount;
+
+      while (p.xp >= p.xpToNext && p.level < maxLvl) {
+        p.xp -= p.xpToNext;
+        p.level++;
+        p.xpToNext = this._xpRequiredForLevel(p.level);
+        const bonusTiers = Math.min(9, p.level - 1);
+        p.maxHp = BS.PLAYER.MAX_HP + bonusTiers * 4;
+        if (p.alive) {
+          p.hp = Math.min(p.maxHp, p.hp + 25);
+          p.shield = Math.min(BS.PLAYER.MAX_SHIELD, p.shield + 20);
+        }
+        this.events.push({
+          type: 'levelUp',
+          playerId: p.id,
+          playerName: p.name,
+          playerTeam: p.team,
+          level: p.level,
+          maxHp: p.maxHp,
+          reason,
+        });
+      }
+    }
+
     _killPlayer(victim, killer, weaponId, headshot) {
       if (!victim.alive) return;
+      const victimBounty = victim.bounty || 0;
       victim.alive = false;
       victim.deaths++;
       victim.streak = 0;
+      victim.bounty = 0;
       victim.respawnTimer = BS.PLAYER.RESPAWN_TIME;
 
+      const prog = BS.PROGRESSION || {};
       let streak = 0;
+      let xpEarned = 0;
+      let bountyClaimed = 0;
+
       if (killer && killer.id !== victim.id) {
         killer.kills++;
         killer.streak++;
@@ -1091,7 +1224,56 @@
         streak = killer.streak;
 
         // Small heal-on-kill momentum (RIVALS / Arsenal vibe!)
-        killer.hp = Math.min(BS.PLAYER.MAX_HP, killer.hp + 15);
+        const killerMaxHp = killer.maxHp || BS.PLAYER.MAX_HP;
+        killer.hp = Math.min(killerMaxHp, killer.hp + 15);
+
+        // Award kill XP + headshot bonus + notoriety bonus
+        xpEarned = (prog.KILL_XP || 60) + (headshot ? prog.HEADSHOT_BONUS_XP || 25 : 0);
+        if (killer.bounty > 0) {
+          xpEarned += prog.NOTORIETY_KILL_XP || 15;
+        }
+
+        // Shutdown! Claim the victim's active killstreak bounty for massive bonus XP & score!
+        if (victimBounty > 0) {
+          bountyClaimed = victimBounty;
+          xpEarned += victimBounty;
+          const scoreBonus = Math.round(victimBounty * 0.75);
+          killer.score += scoreBonus;
+          this.events.push({
+            type: 'bountyClaimed',
+            killerId: killer.id,
+            killerName: killer.name,
+            killerTeam: killer.team,
+            victimId: victim.id,
+            victimName: victim.name,
+            victimTeam: victim.team,
+            bounty: victimBounty,
+            scoreBonus,
+          });
+        }
+
+        // Place or escalate Bounty on players/bots who reach 3+ streak!
+        const minStreak = prog.BOUNTY_MIN_STREAK || 3;
+        if (killer.streak >= minStreak) {
+          const prevBounty = killer.bounty || 0;
+          const newBounty = Math.min(
+            prog.BOUNTY_MAX_XP || 350,
+            (prog.BOUNTY_BASE_XP || 90) + (killer.streak - minStreak) * (prog.BOUNTY_PER_EXTRA_KILL || 40)
+          );
+          killer.bounty = newBounty;
+          if (prevBounty === 0 || killer.streak === 5 || killer.streak === 8) {
+            this.events.push({
+              type: 'bountyPlaced',
+              playerId: killer.id,
+              playerName: killer.name,
+              playerTeam: killer.team,
+              streak: killer.streak,
+              bounty: newBounty,
+            });
+          }
+        }
+
+        this._grantXP(killer, xpEarned, bountyClaimed > 0 ? 'bounty' : 'kill');
 
         if (this.mode.id === 'tdm') {
           if (killer.team === 'blue') this.scores.blue++;
@@ -1133,6 +1315,8 @@
         weaponId,
         headshot,
         streak,
+        xpEarned,
+        bountyClaimed,
         x: victim.x,
         y: victim.y + 1.0,
         z: victim.z,
@@ -1163,8 +1347,9 @@
         const dist = Math.hypot(p.x - pk.x, p.y + 0.9 - pk.y, p.z - pk.z);
         if (dist < 1.35) {
           let used = false;
-          if (pk.type === 'health' && p.hp < BS.PLAYER.MAX_HP) {
-            p.hp = Math.min(BS.PLAYER.MAX_HP, p.hp + 45);
+          const maxHp = p.maxHp || BS.PLAYER.MAX_HP;
+          if (pk.type === 'health' && p.hp < maxHp) {
+            p.hp = Math.min(maxHp, p.hp + 45);
             used = true;
           } else if (pk.type === 'shield' && p.shield < BS.PLAYER.MAX_SHIELD) {
             p.shield = BS.PLAYER.MAX_SHIELD;
@@ -1186,6 +1371,7 @@
       const zone = this.map.kothZone;
       let blueIn = 0;
       let redIn = 0;
+      const capturers = [];
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         if (!p.alive) continue;
@@ -1193,6 +1379,7 @@
         if (d <= zone.radius && Math.abs(p.y - zone.y) < 2.4) {
           if (p.team === 'blue') blueIn++;
           else if (p.team === 'red') redIn++;
+          capturers.push(p);
         }
       }
 
@@ -1200,12 +1387,30 @@
         this.kothOwner = 'contested';
       } else if (blueIn > 0) {
         this.kothOwner = 'blue';
+        const xpRate = (BS.PROGRESSION && BS.PROGRESSION.KOTH_XP_PER_SEC) || 8;
+        for (let i = 0; i < capturers.length; i++) {
+          const cp = capturers[i];
+          cp.xpAccum = (cp.xpAccum || 0) + dt * xpRate;
+          if (cp.xpAccum >= 10) {
+            cp.xpAccum -= 10;
+            this._grantXP(cp, 10, 'koth');
+          }
+        }
         this.scores.blue = Math.min(this.mode.scoreLimit, this.scores.blue + dt * (2.6 + blueIn * 0.7));
         if (this.scores.blue >= this.mode.scoreLimit) {
           this._finishMatch('BLUE TEAM', 'Captured & held the Blox Zone!');
         }
       } else if (redIn > 0) {
         this.kothOwner = 'red';
+        const xpRate = (BS.PROGRESSION && BS.PROGRESSION.KOTH_XP_PER_SEC) || 8;
+        for (let i = 0; i < capturers.length; i++) {
+          const cp = capturers[i];
+          cp.xpAccum = (cp.xpAccum || 0) + dt * xpRate;
+          if (cp.xpAccum >= 10) {
+            cp.xpAccum -= 10;
+            this._grantXP(cp, 10, 'koth');
+          }
+        }
         this.scores.red = Math.min(this.mode.scoreLimit, this.scores.red + dt * (2.6 + redIn * 0.7));
         if (this.scores.red >= this.mode.scoreLimit) {
           this._finishMatch('RED TEAM', 'Captured & held the Blox Zone!');
@@ -1245,6 +1450,7 @@
 
       ai.thinkTimer -= dt;
       ai.strafeTimer -= dt;
+      ai.weaponSwitchTimer -= dt;
       if (ai.jumpTimer > 0) ai.jumpTimer -= dt;
 
       if (ai.strafeTimer <= 0) {
@@ -1300,24 +1506,75 @@
       inp.ads = false;
       inp.reload = false;
 
+      // Dynamic all-weapon selection (bots can use any of the 6 weapons freely outside Gun Game!)
+      if (this.mode.id !== 'gungame') {
+        let pickPool = null;
+        if (target && bot.weaponId === 'rocket' && targetDist < 4.8) {
+          // Don't blow yourself up at point-blank range
+          pickPool = ['shotgun', 'smg', 'blade'];
+        } else if (target && bot.reloading && targetDist < 9.5) {
+          // Quick-swap to a loaded close-range weapon mid-fight
+          pickPool = ['blade', 'shotgun', 'smg', 'ar'].filter(
+            (id) => id !== bot.weaponId && (id === 'blade' || bot.ammo[id] > 0)
+          );
+        } else if (ai.weaponSwitchTimer <= 0) {
+          if (target) {
+            if (targetDist < 5.5) pickPool = ['blade', 'shotgun', 'smg', 'ar'];
+            else if (targetDist < 16) pickPool = ['ar', 'smg', 'shotgun', 'rocket', 'blade'];
+            else if (targetDist < 28) pickPool = ['ar', 'rocket', 'sniper', 'smg'];
+            else pickPool = ['sniper', 'ar', 'rocket'];
+            ai.weaponSwitchTimer = 4.0 + Math.random() * 5.5;
+          } else {
+            // Roaming: pick any of the 6 weapons freely
+            pickPool = BS.WEAPONS.map((w) => w.id);
+            ai.weaponSwitchTimer = 6.0 + Math.random() * 7.0;
+          }
+        }
+        if (pickPool && pickPool.length > 0) {
+          const nextId = pickPool[Math.floor(Math.random() * pickPool.length)];
+          const nextW = BS.WEAPON_BY_ID[nextId];
+          if (nextW && nextW.id !== bot.weaponId) {
+            inp.weaponSlot = nextW.slot;
+            ai.desiredWeapon = nextW.id;
+          }
+        }
+      }
+
       if (target) {
-        // Aim at target with difficulty-scaled wobble
+        const w = BS.WEAPON_BY_ID[bot.weaponId] || BS.WEAPONS[0];
+        // Aim at target (slightly lower for RPG splash hits, chest/head for hitscan)
+        const aimYOff = w.id === 'rocket' ? 0.35 : 1.15;
         const dx = target.x - bot.x;
-        const dy = target.y + 1.15 - eyeY;
+        const dy = target.y + aimYOff - eyeY;
         const dz = target.z - bot.z;
         const horiz = Math.hypot(dx, dz) || 0.001;
         const wobble = Math.sin(this.time * 4.7 + bot.id.length * 3) * diffCfg.inaccuracy;
         const desiredYaw = Math.atan2(dx, -dz) + wobble;
         const desiredPitch = clamp(Math.atan2(dy, horiz) + wobble * 0.5, -1.1, 1.1);
 
-        inp.yaw = lerpAngle(bot.yaw, desiredYaw, clamp(diffCfg.aimSpeed * dt, 0, 1));
-        inp.pitch = bot.pitch + (desiredPitch - bot.pitch) * clamp(diffCfg.aimSpeed * dt, 0, 1);
+        const aimBlend = 1 - Math.exp(-diffCfg.aimSpeed * dt);
+        inp.yaw = lerpAngle(bot.yaw, desiredYaw, aimBlend);
+        inp.pitch = bot.pitch + (desiredPitch - bot.pitch) * aimBlend;
 
-        const w = BS.WEAPON_BY_ID[bot.weaponId] || BS.WEAPONS[0];
-        const idealDist = w.type === 'melee' ? 1.5 : w.id === 'shotgun' ? 8 : w.id === 'sniper' ? 24 : 14;
+        const idealDist =
+          w.type === 'melee'
+            ? 1.6
+            : w.id === 'shotgun'
+            ? 7.5
+            : w.id === 'sniper'
+            ? 24
+            : w.id === 'rocket'
+            ? 15
+            : 13;
 
-        inp.moveZ = targetDist > idealDist + 3 ? 1 : targetDist < idealDist - 4 ? -0.65 : 0.15;
-        inp.moveX = ai.strafeDir * 0.78;
+        if (w.type === 'melee') {
+          inp.moveZ = 1.0;
+          inp.moveX = ai.strafeDir * 0.35;
+          if (targetDist > 4.5 && targetDist < 14 && bot.dashCooldown <= 0) inp.dash = true;
+        } else {
+          inp.moveZ = targetDist > idealDist + 3 ? 1 : targetDist < idealDist - 4 ? -0.65 : 0.15;
+          inp.moveX = ai.strafeDir * 0.78;
+        }
 
         // Avoid stepping into the void on Skyblox
         if (!this._hasGroundAhead(bot, inp.yaw, inp.moveX, inp.moveZ)) {
@@ -1325,13 +1582,16 @@
           inp.moveX = 0;
         }
 
-        // Fire when roughly aimed
+        // Fire when aimed & within effective range (properly tap-firing semi-auto guns!)
         let angleDiff = Math.abs(((desiredYaw - inp.yaw + Math.PI) % (Math.PI * 2)) - Math.PI);
-        if (angleDiff < 0.28 && Math.random() < diffCfg.fireChance) {
+        const inRange = w.type === 'melee' ? targetDist <= w.range + 0.9 : targetDist <= w.range;
+        const safeRpg = w.id !== 'rocket' || targetDist >= 4.0;
+        const canTrigger = w.fireMode === 'auto' || (!bot.prevFire && bot.fireCooldown <= 0);
+        if (inRange && safeRpg && canTrigger && angleDiff < 0.28 && Math.random() < diffCfg.fireChance) {
           inp.fire = true;
         }
-        if (Math.random() < 0.008 && bot.grounded) inp.jump = true;
-        if (Math.random() < 0.005 && bot.dashCooldown <= 0) inp.dash = true;
+        if (Math.random() < 0.48 * dt && bot.grounded) inp.jump = true;
+        if (Math.random() < 0.3 * dt && bot.dashCooldown <= 0) inp.dash = true;
       } else {
         // Navigate toward objective / health pickup / waypoint
         let goal = this.map.waypoints[ai.waypointIdx % this.map.waypoints.length];
@@ -1351,8 +1611,8 @@
         }
 
         const desiredYaw = Math.atan2(dx, -dz);
-        inp.yaw = lerpAngle(bot.yaw, desiredYaw, clamp(6.0 * dt, 0, 1));
-        inp.pitch = bot.pitch * 0.9;
+        inp.yaw = lerpAngle(bot.yaw, desiredYaw, 1 - Math.exp(-6.0 * dt));
+        inp.pitch = bot.pitch * Math.exp(-6.0 * dt);
         inp.moveZ = 1.0;
         inp.moveX = 0;
 
@@ -1389,12 +1649,12 @@
     }
 
     captureInterpState() {
-      const players = {};
+      const players = Object.create(null);
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         players[p.id] = { x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive };
       }
-      const projectiles = {};
+      const projectiles = Object.create(null);
       for (let i = 0; i < this.projectiles.length; i++) {
         const pr = this.projectiles[i];
         projectiles[pr.id] = { x: pr.x, y: pr.y, z: pr.z };
@@ -1420,6 +1680,7 @@
           isBot: p.isBot,
           colors: p.colors,
           accessory: p.accessory,
+          weaponSkin: p.weaponSkin,
           x: p.x,
           y: p.y,
           z: p.z,
@@ -1430,6 +1691,7 @@
           pitch: p.pitch,
           grounded: p.grounded,
           hp: p.hp,
+          maxHp: p.maxHp || BS.PLAYER.MAX_HP,
           shield: p.shield,
           alive: p.alive,
           respawnTimer: p.respawnTimer,
@@ -1439,7 +1701,7 @@
           magSize: (BS.WEAPON_BY_ID[p.weaponId] || BS.WEAPONS[0]).magSize,
           reloading: p.reloading,
           reloadProgress: p.reloading
-            ? 1 - p.reloadTimer / (BS.WEAPON_BY_ID[p.weaponId] || BS.WEAPONS[0]).reloadTime
+            ? 1 - p.reloadTimer / (p.reloadDuration || (BS.WEAPON_BY_ID[p.weaponId] || BS.WEAPONS[0]).reloadTime)
             : 0,
           dashCooldown: p.dashCooldown,
           speedBoostTimer: p.speedBoostTimer,
@@ -1452,6 +1714,10 @@
           deaths: p.deaths,
           streak: p.streak,
           score: p.score,
+          level: p.level || 1,
+          xp: Math.floor(p.xp || 0),
+          xpToNext: p.xpToNext || 100,
+          bounty: p.bounty || 0,
           gunGameTier: p.gunGameTier,
         })),
         projectiles: this.projectiles.map((pr) => ({

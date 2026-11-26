@@ -196,10 +196,167 @@
     },
   ];
 
-  BS.WEAPON_BY_ID = {};
+  BS.WEAPON_BY_ID = Object.create(null);
   BS.WEAPONS.forEach((w) => {
     BS.WEAPON_BY_ID[w.id] = w;
   });
+
+  BS.SECURITY = {
+    MAX_NAME_LEN: 16,
+    MAX_BOTS: 11,
+    MAX_INPUTS_PER_SEC: 360,
+    MAX_PACKET_BYTES: 65536,
+  };
+
+  // Match XP Leveling & Killstreak Bounty configuration (applies to both players & AI bots!)
+  BS.PROGRESSION = {
+    BASE_LEVEL_XP: 100,
+    XP_PER_LEVEL_STEP: 35,
+    MAX_LEVEL: 25,
+    KILL_XP: 60,
+    HEADSHOT_BONUS_XP: 25,
+    NOTORIETY_KILL_XP: 15,
+    BOUNTY_MIN_STREAK: 3,
+    BOUNTY_BASE_XP: 90,
+    BOUNTY_PER_EXTRA_KILL: 40,
+    BOUNTY_MAX_XP: 350,
+    KOTH_XP_PER_SEC: 8,
+  };
+
+  // CS2-inspired weapon finishes (procedural 256x256 textures + metallic shader sheen)
+  BS.WEAPON_SKINS = [
+    {
+      id: 'default',
+      name: 'Factory Stock',
+      rarity: 'standard',
+      swatch: 'linear-gradient(135deg,#323c52 50%,#24d2ff 50%)',
+      pattern: null,
+      metallic: 0.15,
+    },
+    {
+      id: 'asiimov',
+      name: 'Asiimov',
+      rarity: 'covert',
+      swatch: 'linear-gradient(135deg,#f4f6fb 38%,#ff6a14 38%,#ff6a14 70%,#1b1d24 70%)',
+      pattern: 'asiimov',
+      body: [0.98, 0.98, 0.99],
+      accent: [1.0, 0.44, 0.08],
+      dark: [0.11, 0.12, 0.15],
+      metal: [0.88, 0.9, 0.94],
+      wood: [0.95, 0.96, 0.98],
+      metallic: 0.28,
+    },
+    {
+      id: 'dragonlore',
+      name: 'Dragon Lore',
+      rarity: 'covert',
+      swatch: 'linear-gradient(135deg,#d8a832 35%,#b82820 65%,#5e5528 100%)',
+      pattern: 'dragonlore',
+      body: [0.98, 0.94, 0.84],
+      accent: [1.0, 0.72, 0.14],
+      dark: [0.22, 0.2, 0.14],
+      metal: [0.64, 0.56, 0.34],
+      wood: [0.68, 0.52, 0.2],
+      metallic: 0.58,
+    },
+    {
+      id: 'hyperbeast',
+      name: 'Hyper Beast',
+      rarity: 'covert',
+      swatch: 'linear-gradient(135deg,#1ae8ff 20%,#ff2492 55%,#7c24ff 80%,#8cff2e 100%)',
+      pattern: 'hyperbeast',
+      body: [0.98, 0.98, 1.0],
+      accent: [1.0, 0.18, 0.62],
+      dark: [0.12, 0.08, 0.2],
+      metal: [0.26, 0.84, 0.95],
+      wood: [0.35, 0.14, 0.52],
+      metallic: 0.36,
+    },
+    {
+      id: 'printstream',
+      name: 'Printstream',
+      rarity: 'covert',
+      swatch: 'linear-gradient(135deg,#f5f7ff 52%,#14161c 52%,#14161c 82%,#66f0ff 100%)',
+      pattern: 'printstream',
+      body: [0.98, 0.99, 1.0],
+      accent: [0.74, 0.96, 1.0],
+      dark: [0.08, 0.09, 0.12],
+      metal: [0.92, 0.94, 0.98],
+      wood: [0.94, 0.95, 0.98],
+      metallic: 0.76,
+    },
+    {
+      id: 'fade',
+      name: 'Fade',
+      rarity: 'covert',
+      swatch: 'linear-gradient(135deg,#5a28e8 10%,#ff2e98 52%,#ffd230 95%)',
+      pattern: 'fade',
+      body: [1.0, 1.0, 1.0],
+      accent: [1.0, 0.76, 0.2],
+      dark: [0.14, 0.12, 0.19],
+      metal: [0.95, 0.62, 0.82],
+      wood: [0.82, 0.36, 0.68],
+      metallic: 0.92,
+    },
+    {
+      id: 'casehardened',
+      name: 'Case Hardened',
+      rarity: 'classified',
+      swatch: 'linear-gradient(135deg,#1d8eff 36%,#64c8ff 56%,#d8a846 78%,#6c3ac4 100%)',
+      pattern: 'casehardened',
+      body: [0.98, 0.99, 1.0],
+      accent: [0.22, 0.78, 1.0],
+      dark: [0.16, 0.18, 0.22],
+      metal: [0.42, 0.76, 0.98],
+      wood: [0.58, 0.44, 0.24],
+      metallic: 0.88,
+    },
+    {
+      id: 'redline',
+      name: 'Redline',
+      rarity: 'classified',
+      swatch: 'linear-gradient(135deg,#17191f 62%,#ff2438 62%,#ff2438 78%,#17191f 78%)',
+      pattern: 'redline',
+      body: [0.96, 0.96, 0.98],
+      accent: [1.0, 0.16, 0.22],
+      dark: [0.09, 0.1, 0.12],
+      metal: [0.24, 0.26, 0.3],
+      wood: [0.14, 0.15, 0.18],
+      metallic: 0.32,
+    },
+    {
+      id: 'ruby',
+      name: 'Doppler Ruby',
+      rarity: 'gem',
+      swatch: 'linear-gradient(135deg,#7a061b 15%,#e6143c 55%,#ff5a7a 100%)',
+      pattern: 'ruby',
+      body: [1.0, 0.96, 0.98],
+      accent: [1.0, 0.2, 0.36],
+      dark: [0.22, 0.04, 0.08],
+      metal: [0.92, 0.16, 0.3],
+      wood: [0.62, 0.08, 0.18],
+      metallic: 1.0,
+    },
+    {
+      id: 'sapphire',
+      name: 'Doppler Sapphire',
+      rarity: 'gem',
+      swatch: 'linear-gradient(135deg,#081d7a 15%,#1858f0 55%,#44d2ff 100%)',
+      pattern: 'sapphire',
+      body: [0.96, 0.98, 1.0],
+      accent: [0.22, 0.74, 1.0],
+      dark: [0.05, 0.09, 0.24],
+      metal: [0.16, 0.52, 0.98],
+      wood: [0.08, 0.24, 0.62],
+      metallic: 1.0,
+    },
+  ];
+
+  BS.WEAPON_SKIN_BY_ID = Object.create(null);
+  BS.WEAPON_SKINS.forEach((ws) => {
+    BS.WEAPON_SKIN_BY_ID[ws.id] = ws;
+  });
+  BS.WEAPON_SKIN_IDS = BS.WEAPON_SKINS.map((ws) => ws.id);
 
   BS.MODES = {
     tdm: {
