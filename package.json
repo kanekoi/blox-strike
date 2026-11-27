@@ -3,7 +3,8 @@
   "private": true,
   "description": "Blox Strike LAN multiplayer server",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/sim.test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

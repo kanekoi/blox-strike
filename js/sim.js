@@ -579,7 +579,7 @@
         if (p.slideCooldown > 0) p.slideCooldown = Math.max(0, p.slideCooldown - dt);
         if (p.grenadeCooldown > 0) p.grenadeCooldown = Math.max(0, p.grenadeCooldown - dt);
         if (p.speedBoostTimer > 0) p.speedBoostTimer = Math.max(0, p.speedBoostTimer - dt);
-        if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+        if (p.fireCooldown > 0) p.fireCooldown -= dt; // may dip below 0 by < dt; _fireWeapon carries it
 
         if (p.isBot) {
           this._updateBotAI(p, dt);
@@ -985,7 +985,8 @@
     }
 
     _fireWeapon(p, w) {
-      p.fireCooldown = 1 / w.fireRate;
+      // Carry the sub-tick leftover so fire rate matches config at 60Hz (LAN) and high-Hz solo alike.
+      p.fireCooldown = 1 / w.fireRate + Math.min(0, p.fireCooldown);
       p.recoilKick = Math.min(1, p.recoilKick + w.recoilKick * 2.2);
       p.spawnProtect = 0; // Shooting ends spawn protection
 
