@@ -103,7 +103,7 @@
       shortName: 'SMG',
       category: 'smg',
       fireMode: 'auto',
-      damage: 15,
+      damage: 17, // was 15: 7-shot body TTK lost to the AR at 60Hz; 6 shots now wins up close
       headMult: 1.6,
       fireRate: 14.5,
       magSize: 36,
@@ -917,12 +917,12 @@
         ffa: [
           { x: 0, y: 0.2, z: -30, yaw: Math.PI },
           { x: 0, y: 0.2, z: 30, yaw: 0 },
-          { x: -25, y: 1.2, z: 0, yaw: Math.PI * 0.5 },
-          { x: 25, y: 1.2, z: 0, yaw: -Math.PI * 0.5 },
+          { x: -22, y: 1.2, z: 0, yaw: Math.PI * 0.5 }, // moved off the side-island crates
+          { x: 22, y: 1.2, z: 0, yaw: -Math.PI * 0.5 },
           { x: -7, y: 0.2, z: -24, yaw: Math.PI },
           { x: 7, y: 0.2, z: 24, yaw: 0 },
-          { x: -7, y: 0.2, z: 7, yaw: Math.PI * 0.25 },
-          { x: 7, y: 0.2, z: -7, yaw: -Math.PI * 0.75 },
+          { x: -5.6, y: 0.2, z: 8.4, yaw: Math.PI * 0.25 }, // moved out of central cover
+          { x: 5.6, y: 0.2, z: -8.4, yaw: -Math.PI * 0.75 },
         ],
       },
       waypoints: [

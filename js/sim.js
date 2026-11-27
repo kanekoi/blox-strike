@@ -561,6 +561,8 @@
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         if (!p.alive) {
+          p.input.fireTap = false; // taps pressed while dead must not fire/hop on respawn
+          p.input.jumpTap = false;
           // Allow human players to select their next weapon even during respawn countdown!
           if (!p.isBot) this._applyWeaponSlotSwitch(p);
           p.respawnTimer -= dt;
@@ -956,14 +958,17 @@
       if (this.projectiles.length < 48) {
         const throwSpd = gCfg.THROW_SPEED || 21.5;
         const upVel = gCfg.UP_VEL || 4.2;
+        // Flush against a wall the 0.65 offset lands inside it and the grenade falls out the floor.
+        const wallHit = this.raycastBlocks(ox, oy, oz, dx, dy, dz, 0.9);
+        const spawnOff = wallHit.hit ? Math.max(0, wallHit.dist - 0.3) : 0.65;
         this.projectiles.push({
           id: this.nextProjId++,
           kind: 'grenade',
           ownerId: p.id,
           weaponId: 'grenade',
-          x: ox + dx * 0.65,
-          y: oy + dy * 0.65,
-          z: oz + dz * 0.65,
+          x: ox + dx * spawnOff,
+          y: oy + dy * spawnOff,
+          z: oz + dz * spawnOff,
           vx: dx * throwSpd + p.vx * 0.25,
           vy: dy * throwSpd + upVel,
           vz: dz * throwSpd + p.vz * 0.25,
@@ -1652,7 +1657,9 @@
             this._finishMatch(killer.name, 'Dominated Free-For-All!');
           }
         } else if (this.mode.id === 'gungame') {
-          killer.gunGameTierKills++;
+          // Final tier must be finished with its own weapon (no grenade/barrel wins).
+          const lastTier = killer.gunGameTier >= BS.WEAPONS.length - 1;
+          if (!lastTier || weaponId === BS.WEAPONS[killer.gunGameTier].id) killer.gunGameTierKills++;
           if (killer.gunGameTierKills >= 2) {
             killer.gunGameTier++;
             killer.gunGameTierKills = 0;
@@ -1791,7 +1798,8 @@
         else if (this.scores.red > this.scores.blue) this._finishMatch('RED TEAM', 'Time expired — Red leads!');
         else this._finishMatch('DRAW', 'Time expired — Tied match!');
       } else {
-        const sorted = this.players.slice().sort((a, b) => b.kills - a.kills || b.score - a.score);
+        // Same tiebreak as the client scoreboard, so the winner is the player ranked first.
+        const sorted = this.players.slice().sort((a, b) => b.kills - a.kills || b.score - a.score || a.deaths - b.deaths);
         this._finishMatch(sorted[0] ? sorted[0].name : 'NOBODY', 'Time expired — Top scorer wins!');
       }
     }
