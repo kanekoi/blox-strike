@@ -1019,7 +1019,8 @@
           const dist = Math.hypot(dx, dy, dz);
           if (dist < bestDist) {
             const dot = (dx * baseDx + dy * baseDy + dz * baseDz) / Math.max(0.001, dist);
-            if (dot > 0.52) {
+            // No swinging through walls.
+            if (dot > 0.52 && !this.raycastBlocks(ox, oy, oz, dx / dist, dy / dist, dz / dist, dist).hit) {
               bestDist = dist;
               bestTarget = other;
             }
@@ -1670,8 +1671,9 @@
       this.events.push({
         type: 'kill',
         killerId: killer ? killer.id : null,
-        killerName: killer ? killer.name : 'THE VOID',
-        killerTeam: killer ? killer.team : 'void',
+        // Null killer = void fall or self-damage (own rocket/grenade): credit the void only for falls.
+        killerName: killer ? killer.name : weaponId === 'void' ? 'THE VOID' : victim.name,
+        killerTeam: killer ? killer.team : weaponId === 'void' ? 'void' : victim.team,
         victimId: victim.id,
         victimName: victim.name,
         victimTeam: victim.team,
@@ -1948,7 +1950,9 @@
         }
 
         // Fire when aimed & within effective range (properly tap-firing semi-auto guns!)
-        let angleDiff = Math.abs(((desiredYaw - inp.yaw + Math.PI) % (Math.PI * 2)) - Math.PI);
+        // atan2 wraps to [-π, π]; JS % keeps the sign and broke aim checks across the ±π seam.
+        const yawErr = desiredYaw - inp.yaw;
+        let angleDiff = Math.abs(Math.atan2(Math.sin(yawErr), Math.cos(yawErr)));
         const inRange = w.type === 'melee' ? targetDist <= w.range + 0.9 : targetDist <= w.range;
         const safeRpg = w.id !== 'rocket' || targetDist >= 4.0;
         const canTrigger = w.fireMode === 'auto' || (!bot.prevFire && bot.fireCooldown <= 0);
