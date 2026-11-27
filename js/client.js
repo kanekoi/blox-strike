@@ -346,7 +346,12 @@
         this._startMenuDemo();
         this._updateOverlays();
         this._showBanner(title, sub, 3);
+        // HUD banner is hidden behind the menu, so also say it on the menu itself.
+        const st = document.getElementById('menu-status');
+        st.textContent = `${title}: ${sub}`;
+        st.hidden = false;
       };
+      document.getElementById('menu-status').hidden = true;
       ws.onClose = () => backToMenu('DISCONNECTED', 'LAN SERVER CLOSED THE CONNECTION');
 
       this.state = 'playing';
@@ -1330,7 +1335,11 @@
         // Note: uses static map/world raycast from sim; for online MP, replace with client-side map raycast.
         const camP = this.renderer.camPos;
         const camF = this.renderer.camForward;
+        // LAN: local sim has no players, so ray against the latest server snapshot's hitboxes.
+        const lan = this.transport !== this.localTransport;
+        if (lan) this.sim.players = this.snapshot.players;
         const res = this.sim.raycastWorldAndPlayers(camP[0], camP[1], camP[2], camF[0], camF[1], camF[2], 200, localSimP);
+        if (lan) this.sim.players = [];
         const tpDist = this.renderer.tpDist || 0;
         if (res.dist > tpDist + 0.5) {
           const ex = localSimP.x;
@@ -1369,13 +1378,13 @@
         weaponSlot: this.desiredWeaponSlot,
       };
 
+      // Only clear taps once a packet actually left; a rate-limited frame must not eat a quick click/jump.
+      if (this.transport.sendInput(cmd, force) === false) return;
       this.pendingFire = false;
       this.pendingJump = false;
       this.pendingDash = false;
       this.pendingGrenade = false;
       this.pendingReload = false;
-
-      this.transport.sendInput(cmd, force);
     }
 
     _setHudText(el, key, val) {

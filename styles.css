@@ -1,5 +1,12 @@
 /* Blox Strike — Modern Roblox-Inspired Arcade Shooter UI */
 
+.menu-status {
+  margin-top: 8px;
+  color: #ff6b6b;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 :root {
   --bg-glass: rgba(10, 15, 28, 0.88);
   --bg-glass-strong: rgba(9, 14, 26, 0.95);

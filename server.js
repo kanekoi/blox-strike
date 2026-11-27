@@ -122,6 +122,8 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096 });
 
 wss.on('connection', (ws, req) => {
   let client = null;
+  // Without this, one bad socket (reset, oversized frame) emits an unhandled 'error' and kills the match for everyone.
+  ws.on('error', (err) => console.warn('Socket error:', err.message));
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) return;

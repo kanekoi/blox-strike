@@ -243,7 +243,7 @@
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const now = Date.now();
       // Client-side rate limit (~65Hz max) to avoid spamming remote server
-      if (!force && now - this.lastSendTime < 15 && !cmd.dash && !cmd.grenade && !cmd.reload && cmd.weaponSlot === null) return;
+      if (!force && now - this.lastSendTime < 15 && !cmd.dash && !cmd.grenade && !cmd.reload && cmd.weaponSlot === null) return false; // not sent: caller keeps its pending taps
       const clean = sanitizeOutgoingInput(cmd);
       if (!clean) return;
       this.lastSendTime = now;

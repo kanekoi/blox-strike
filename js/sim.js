@@ -427,6 +427,8 @@
         p.input.pitch = clamp(cmd.pitch, -1.48, 1.48);
       }
       p.input.jump = !!cmd.jump;
+      if (cmd.jump) p.input.jumpTap = true;
+      if (cmd.fire) p.input.fireTap = true;
       if (cmd.dash) p.input.dash = true;
       p.input.crouch = !!cmd.crouch;
       if (cmd.grenade) p.input.grenade = true;
@@ -581,9 +583,18 @@
           this._updateBotAI(p, dt);
         }
 
+        // Taps latched between ticks (press+release in one tick) still count once.
+        const heldFire = p.input.fire;
+        const heldJump = p.input.jump;
+        if (p.input.fireTap) p.input.fire = true;
+        if (p.input.jumpTap) p.input.jump = true;
         this._updatePlayerMovement(p, dt);
         p.input.dash = false;
         this._updatePlayerCombat(p, dt);
+        p.input.fire = heldFire;
+        p.input.jump = heldJump;
+        p.input.fireTap = false;
+        p.input.jumpTap = false;
         p.input.reload = false;
         p.input.grenade = false;
         this._checkJumpPads(p);
@@ -642,7 +653,7 @@
 
       // Crouch & Power Slide ([C]) initiation (supports sprint-slides AND landing-slides!)
       const preHoriz = Math.hypot(p.vx, p.vz);
-      const slideTrigger = inp.crouch && (!p.prevCrouch || !p.wasGrounded);
+      const slideTrigger = inp.crouch && (!p.prevCrouch || p.justLanded);
       if (slideTrigger && p.grounded && !p.sliding && p.slideCooldown <= 0 && p.dashTimer <= 0 && preHoriz > 4.0) {
         p.sliding = true;
         p.crouching = true;
@@ -766,6 +777,8 @@
           p.grounded = true;
         }
       }
+      // wasGrounded is overwritten below, so remember the landing for next tick's slide check.
+      p.justLanded = !p.wasGrounded && p.grounded;
       p.wasGrounded = p.grounded;
 
       // Walk animation phase (paused cleanly during a power slide!)
