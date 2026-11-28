@@ -2015,22 +2015,34 @@
         legRxR = legRxR * 0.5 - 0.35 * crouchB;
       }
 
-      Mat4.fromTRS(this._mLocal, -0.2, 0.72, 0, legRxL, 0, 0, 1, 1, 1);
-      Mat4.multiply(this._mB, this._mRoot, this._mLocal);
-      this._drawChild(this._mB, 0, -0.3, 0, 0, 0, 0, 0.34, 0.6, 0.36, legCol, 4, em);
-      this._drawChild(this._mB, 0, -0.66, -0.03, 0, 0, 0, 0.36, 0.14, 0.42, darkCol, 4, em);
-
-      Mat4.fromTRS(this._mLocal, 0.2, 0.72, 0, legRxR, 0, 0, 1, 1, 1);
-      Mat4.multiply(this._mB, this._mRoot, this._mLocal);
-      this._drawChild(this._mB, 0, -0.3, 0, 0, 0, 0, 0.34, 0.6, 0.36, legCol, 4, em);
-      this._drawChild(this._mB, 0, -0.66, -0.03, 0, 0, 0, 0.36, 0.14, 0.42, darkCol, 4, em);
+      const padCol = tint([0.22, 0.24, 0.29]);
+      const soleCol = tint([0.93, 0.94, 0.96]);
+      const teamCol =
+        p.team === 'blue' ? [0.3, 0.75, 1.0] : p.team === 'red' ? [1.0, 0.4, 0.45] : p.colors.legs;
+      for (const [hipX, legRx] of [[-0.2, legRxL], [0.2, legRxR]]) {
+        Mat4.fromTRS(this._mLocal, hipX, 0.72, 0, legRx, 0, 0, 1, 1, 1);
+        Mat4.multiply(this._mB, this._mRoot, this._mLocal);
+        this._drawChild(this._mB, 0, -0.3, 0, 0, 0, 0, 0.34, 0.6, 0.36, legCol, 4, em); // leg
+        this._drawChild(this._mB, 0, -0.3, -0.19, 0, 0, 0, 0.28, 0.14, 0.04, padCol, 4, em); // knee pad
+        this._drawChild(this._mB, 0, -0.64, -0.03, 0, 0, 0, 0.36, 0.12, 0.42, darkCol, 4, em); // sneaker upper
+        this._drawChild(this._mB, 0, -0.715, -0.04, 0, 0, 0, 0.38, 0.04, 0.46, soleCol, 4, em); // white sole
+        this._drawChild(this._mB, 0, -0.66, -0.25, 0, 0, 0, 0.34, 0.08, 0.04, soleCol, 4, em); // toe cap
+      }
 
       // Torso, tactical belt, glowing chest emblem, and shield trim
       this._drawChild(this._mRoot, 0, 1.07, 0, 0, 0, 0, 0.78, 0.72, 0.42, torsoCol, 4, em);
       this._drawChild(this._mRoot, 0, 0.75, 0, 0, 0, 0, 0.8, 0.08, 0.44, darkCol, 4, em);
-      const emblemCol =
-        p.team === 'blue' ? [0.3, 0.75, 1.0] : p.team === 'red' ? [1.0, 0.4, 0.45] : p.colors.legs;
+      this._drawChild(this._mRoot, 0, 0.75, -0.225, 0, 0, 0, 0.13, 0.07, 0.02, tint([0.96, 0.78, 0.3]), 4, em); // buckle
+      const emblemCol = teamCol;
       this._drawChild(this._mRoot, 0, 1.15, -0.215, 0, 0, 0, 0.22, 0.22, 0.02, emblemCol, 2, 0.6 + em);
+      this._drawChild(this._mRoot, 0, 1.43, 0, 0, 0, 0, 0.48, 0.05, 0.34, darkCol, 4, em); // collar
+      for (const sx of [-0.4, 0.4]) {
+        this._drawChild(this._mRoot, sx, 1.41, 0, 0, 0, 0, 0.32, 0.08, 0.46, padCol, 4, em); // shoulder pad
+        this._drawChild(this._mRoot, sx, 1.37, -0.232, 0, 0, 0, 0.32, 0.025, 0.01, emblemCol, 2, 0.7 + em); // team trim
+        this._drawChild(this._mRoot, sx * 0.5, 1.1, -0.216, 0, 0, 0, 0.08, 0.6, 0.02, darkCol, 4, em); // backpack strap
+      }
+      this._drawChild(this._mRoot, 0, 1.08, 0.28, 0, 0, 0, 0.52, 0.52, 0.14, darkCol, 4, em); // backpack
+      this._drawChild(this._mRoot, 0, 1.2, 0.352, 0, 0, 0, 0.44, 0.06, 0.01, emblemCol, 2, 0.8 + em); // glowing stripe
       if (p.shield > 0) {
         this._drawChild(this._mRoot, 0, 1.07, 0, 0, 0, 0, 0.84, 0.2, 0.48, [0.18, 0.85, 1.0], 2, 0.9);
       }
@@ -2057,17 +2069,16 @@
       const lRx = isBlade ? (p.grounded ? -Math.sin(p.walkPhase) * 0.6 * amp : -0.3) : Math.PI * 0.5 + p.pitch;
       const lRy = isBlade ? 0 : 0.45;
 
-      // Left arm (support hand on gun, or swings with blade)
-      Mat4.fromTRS(this._mLocal, -0.54, 1.38, 0, lRx, lRy, 0, 1, 1, 1);
-      Mat4.multiply(this._mB, this._mRoot, this._mLocal);
-      this._drawChild(this._mB, 0, -0.14, 0, 0, 0, 0, 0.3, 0.3, 0.32, torsoCol, 4, em);
-      this._drawChild(this._mB, 0, -0.45, 0, 0, 0, 0, 0.28, 0.34, 0.3, headCol, 4, em);
-
-      // Right arm (primary weapon hand)
-      Mat4.fromTRS(this._mLocal, 0.54, 1.38, 0, Math.PI * 0.5 + p.pitch, 0, 0, 1, 1, 1);
-      Mat4.multiply(this._mB, this._mRoot, this._mLocal);
-      this._drawChild(this._mB, 0, -0.14, 0, 0, 0, 0, 0.3, 0.3, 0.32, torsoCol, 4, em);
-      this._drawChild(this._mB, 0, -0.45, 0, 0, 0, 0, 0.28, 0.34, 0.3, headCol, 4, em);
+      // Left arm (support hand on gun, or swings with blade) and right arm (primary weapon hand):
+      // sleeve, dark cuff, skin forearm, tactical glove.
+      for (const [sx, rx, ry] of [[-0.54, lRx, lRy], [0.54, Math.PI * 0.5 + p.pitch, 0]]) {
+        Mat4.fromTRS(this._mLocal, sx, 1.38, 0, rx, ry, 0, 1, 1, 1);
+        Mat4.multiply(this._mB, this._mRoot, this._mLocal);
+        this._drawChild(this._mB, 0, -0.14, 0, 0, 0, 0, 0.3, 0.3, 0.32, torsoCol, 4, em);
+        this._drawChild(this._mB, 0, -0.3, 0, 0, 0, 0, 0.31, 0.05, 0.33, darkCol, 4, em);
+        this._drawChild(this._mB, 0, -0.43, 0, 0, 0, 0, 0.28, 0.24, 0.3, headCol, 4, em);
+        this._drawChild(this._mB, 0, -0.6, 0, 0, 0, 0, 0.3, 0.12, 0.32, padCol, 4, em);
+      }
 
       // Detailed multi-part 3D world weapon held in hands (with CS2 skin finish!)
       const wModel = BS.MODELS && BS.MODELS.weapons && BS.MODELS.weapons[w.id];
@@ -2199,14 +2210,17 @@
       });
 
       // Right hand & sleeve gripping weapon
-      this._drawChild(this._mRoot, 0, -0.06, 0.05, 0, 0, 0, 0.09, 0.1, 0.14, p.colors.head, 4, 0);
+      const gloveCol = [0.2, 0.22, 0.27];
+      this._drawChild(this._mRoot, 0, -0.06, 0.05, 0, 0, 0, 0.095, 0.1, 0.14, gloveCol, 4, 0); // glove
+      this._drawChild(this._mRoot, 0.01, -0.085, 0.14, 0.5, 0, 0, 0.08, 0.08, 0.06, p.colors.head, 4, 0); // wrist
       this._drawChild(this._mRoot, 0.03, -0.13, 0.24, 0.5, 0, 0, 0.1, 0.1, 0.36, p.colors.torso, 4, 0);
+      this._drawChild(this._mRoot, 0.018, -0.105, 0.17, 0.5, 0, 0, 0.108, 0.108, 0.035, [0.12, 0.13, 0.16], 4, 0); // cuff
 
       // Support left hand & sleeve (tracks the sliding shotgun pump in real time!)
       if (vm.leftHand) {
         const lh = vm.leftHand;
         const lhZ = lh[2] + pumpOffset;
-        this._drawChild(this._mRoot, lh[0], lh[1] - 0.03, lhZ, 0, 0, 0, 0.1, 0.09, 0.14, p.colors.head, 4, 0);
+        this._drawChild(this._mRoot, lh[0], lh[1] - 0.03, lhZ, 0, 0, 0, 0.1, 0.09, 0.14, gloveCol, 4, 0);
         this._drawChild(
           this._mRoot,
           lh[0] - 0.08,
