@@ -1563,8 +1563,14 @@
         const gCd = lp.grenadeCooldown || 0;
         const gMax = (BS.GRENADE && BS.GRENADE.COOLDOWN) || 7.0;
         const gReady = gCd <= 0;
-        this._setHudWidth(ui.grenadeFill, 'grenW', gReady ? 100 : (1 - gCd / gMax) * 100);
-        this._setHudText(ui.grenadeLabel, 'grenL', gReady ? 'FRAG READY [G]' : `FRAG ${gCd.toFixed(1)}s`);
+        const hudMode = BS.MODES[this.snapshot.modeId];
+        if (hudMode && hudMode.noGrenades) {
+          this._setHudWidth(ui.grenadeFill, 'grenW', 0);
+          this._setHudText(ui.grenadeLabel, 'grenL', 'NO FRAGS THIS MODE');
+        } else {
+          this._setHudWidth(ui.grenadeFill, 'grenW', gReady ? 100 : (1 - gCd / gMax) * 100);
+          this._setHudText(ui.grenadeLabel, 'grenL', gReady ? 'FRAG READY [G]' : `FRAG ${gCd.toFixed(1)}s`);
+        }
       }
 
       const hasSpeed = lp.speedBoostTimer > 0;

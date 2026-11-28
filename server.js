@@ -76,6 +76,8 @@ function removePlayer(id) {
   const i = sim.players.findIndex((p) => p.id === id);
   if (i >= 0) sim.players.splice(i, 1);
   delete sim.playerMap[id];
+  // Their rockets/grenades in flight would land ownerless (no team check = friendly fire): remove them too.
+  sim.projectiles = sim.projectiles.filter((pr) => pr.ownerId !== id);
 }
 
 function addHuman(c) {

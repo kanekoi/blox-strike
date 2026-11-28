@@ -2298,7 +2298,8 @@
       // Support left hand & sleeve (tracks the sliding shotgun pump in real time!)
       if (vm.leftHand) {
         const lh = vm.leftHand;
-        const lhZ = lh[2] + pumpOffset;
+        // HD meshes are one solid piece (no sliding pump), so the hand must not rack it either.
+        const lhZ = lh[2] + (this._getWeaponMesh(w.id) ? 0 : pumpOffset);
         this._drawChild(this._mRoot, lh[0], lh[1] - 0.03, lhZ, 0, 0, 0, 0.1, 0.09, 0.14, gloveCol, 4, 0);
         this._drawChild(
           this._mRoot,

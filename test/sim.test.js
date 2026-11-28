@@ -350,6 +350,38 @@ const tests = {
     assert([...weapons].every((w) => w === 'sniper' || w === 'void' || w === 'barrel'), `unexpected kill weapons: ${[...weapons]}`);
   },
 
+  'KC tag drops (no auto-confirm) when victim stands on an edge'() {
+    const sim = newSim({ modeId: 'kc', mapId: 'skyblox' });
+    const b = addPlayer(sim, 'b', 'blue'), r = addPlayer(sim, 'r', 'red');
+    r.x = 11.2; r.z = 7; r.y = 0; // center over the void, corner on the island
+    sim._killPlayer(r, b, 'ar', false);
+    assert.strictEqual(sim.scores.blue, 0, 'must not auto-confirm a grounded kill');
+    assert.strictEqual(sim.tags.length, 1);
+  },
+
+  'LAN release+press between ticks still double jumps'() {
+    const sim = newSim();
+    const p = addPlayer(sim, 'h');
+    for (let i = 0; i < 300; i++) sim.step(DT);
+    sim.setPlayerInput('h', input({ seq: 1, jump: true }));
+    sim.step(DT); // ground jump, key held
+    sim.step(DT);
+    sim.setPlayerInput('h', input({ seq: 2, jump: false }));
+    sim.setPlayerInput('h', input({ seq: 3, jump: true })); // both arrive before the next tick
+    const ev = sim.step(DT) || [];
+    assert.strictEqual(ev.filter((e) => e.type === 'doubleJump').length, 1);
+  },
+
+  'delayed rocket hit still counts toward accuracy'() {
+    const sim = newSim({ mapId: 'neon' });
+    const a = addPlayer(sim, 'a'), v = addPlayer(sim, 'v');
+    a.shotsFired = 2; a.shotsHit = 0; v.spawnProtect = 0; v.hp = 500; v.maxHp = 500;
+    sim._applyDamage(a, v, 10, 'ar', false, 0, 0, 0); // the later AR shot lands first
+    sim.projectiles.push({ id: 999, kind: 'rocket', ownerId: 'a', weaponId: 'rocket', x: v.x, y: v.y + 0.9, z: v.z, splashRadius: 5, damage: 50, knockback: 0, selfDmgMult: 0.35 });
+    sim._explode(v.x, v.y + 0.9, v.z, sim.projectiles[sim.projectiles.length - 1]);
+    assert.strictEqual(a.shotsHit, 2, 'rocket impact should add its own hit');
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');

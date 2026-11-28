@@ -429,6 +429,7 @@
       if (typeof cmd.pitch === 'number' && Number.isFinite(cmd.pitch)) {
         p.input.pitch = clamp(cmd.pitch, -1.48, 1.48);
       }
+      if (cmd.jump && !p.input.jump) p.input.jumpEdge = true;
       p.input.jump = !!cmd.jump;
       if (cmd.jump) p.input.jumpTap = true;
       if (cmd.fire) p.input.fireTap = true;
@@ -769,7 +770,9 @@
       }
 
       // Double jump: a fresh jump press in mid-air (holding the key never triggers it).
-      const jumpPressed = inp.jump && !p.prevJumpHeld;
+      // jumpEdge: a release+press that arrived between ticks (LAN) still counts as a fresh press.
+      const jumpPressed = (inp.jump && !p.prevJumpHeld) || !!inp.jumpEdge;
+      inp.jumpEdge = false;
       p.prevJumpHeld = !!inp.jump;
       if (!jumpedThisTick && jumpPressed && !p.grounded && p.coyote <= 0 && (p.airJumps || 0) > 0) {
         p.vy = BS.PLAYER.AIR_JUMP_VEL || 9.8;
@@ -1532,6 +1535,10 @@
 
           const dmg = Math.round(pr.damage * (0.35 + 0.65 * falloff) * (isSelf ? selfMult : 1.0));
           if (dmg > 0) {
+            if (!isSelf && owner && pr.kind !== 'grenade' && !pr.hitCounted && pl.alive && this._isEnemy(owner, pl)) {
+              pr.hitCounted = true; // one accuracy hit per rocket, however many it splashes
+              owner.shotsHit = (owner.shotsHit || 0) + 1;
+            }
             this._applyDamage(isSelf ? null : owner, pl, dmg, pr.weaponId || 'rocket', false, pl.x, pl.y + 1.0, pl.z);
           }
         }
@@ -1559,7 +1566,8 @@
         victim.damagers[attacker.id] = (victim.damagers[attacker.id] || 0) + amount;
         // End-of-match stats: real damage dealt, and accuracy (one hit per fired shot, gun shots only).
         attacker.damageDealt = (attacker.damageDealt || 0) + (totalBefore - victim.hp - victim.shield);
-        if (weaponId !== 'grenade' && weaponId !== 'barrel' && attacker.lastHitShot !== attacker.shotsFired) {
+        // Rockets land later than the shot that fired them: they are counted at impact (_explode) instead.
+        if (weaponId !== 'grenade' && weaponId !== 'barrel' && weaponId !== 'rocket' && attacker.lastHitShot !== attacker.shotsFired) {
           attacker.lastHitShot = attacker.shotsFired;
           attacker.shotsHit = (attacker.shotsHit || 0) + 1;
         }
@@ -1819,7 +1827,13 @@
 
     // --- Kill Confirmed ---
     _dropTag(victim, killer) {
-      const floor = this.raycastBlocks(victim.x, victim.y + 0.5, victim.z, 0, -1, 0, 30);
+      // Probe the whole footprint (center + corners): a player standing on an edge is supported by the corner.
+      const R = BS.PLAYER.RADIUS;
+      let floor = { hit: false, dist: Infinity };
+      for (const [ox, oz] of [[0, 0], [R, R], [R, -R], [-R, R], [-R, -R]]) {
+        const h = this.raycastBlocks(victim.x + ox, victim.y + 0.5, victim.z + oz, 0, -1, 0, 30);
+        if (h.hit && h.dist < floor.dist) floor = h;
+      }
       if (!floor.hit) {
         // Died over the void: nothing to pick up, so the kill confirms itself.
         this._scoreTag(killer, victim.team, true);
@@ -2129,7 +2143,8 @@
           // Go confirm (enemy tag) or deny (own team's tag), whichever is closest.
           let best = 30;
           for (const t of this.tags) {
-            const d = Math.hypot(t.x - bot.x, t.z - bot.z);
+            // Height counts extra: a tag on another floor is usually a long way round.
+            const d = Math.hypot(t.x - bot.x, t.z - bot.z) + Math.abs(t.y - bot.y) * 4;
             if (d < best) { best = d; goal = t; }
           }
         }
