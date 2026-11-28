@@ -136,6 +136,18 @@ const tests = {
     assert.strictEqual(sim.events.find((e) => e.type === 'kill').killerName, 'Me');
   },
 
+  'skyblox bots mostly die in combat, not by walking into the void'() {
+    let all = 0, fell = 0;
+    for (let run = 0; run < 3; run++) {
+      const sim = newSim({ mapId: 'skyblox', botCount: 7 });
+      for (let i = 0; i < 60 * 60 && !sim.matchOver; i++) {
+        for (const e of sim.step(DT) || []) if (e.type === 'kill') { all++; if (e.weaponId === 'void') fell++; }
+      }
+    }
+    // Was ~66% before the edge-avoid fix; ~9% after. Bots use Math.random, so keep the bar loose.
+    assert(fell / all < 0.25, `${fell}/${all} deaths were void falls`);
+  },
+
   'LAN 3rd-person aim ray hits snapshot players'() {
     const server = newSim({ mapId: 'neon' });
     const me = addPlayer(server, 'me'), foe = addPlayer(server, 'foe');

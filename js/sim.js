@@ -1952,10 +1952,14 @@
           inp.moveX = ai.strafeDir * 0.78;
         }
 
-        // Avoid stepping into the void on Skyblox
-        if (!this._hasGroundAhead(bot, inp.yaw, inp.moveX, inp.moveZ)) {
-          inp.moveZ = -0.6;
-          inp.moveX = 0;
+        // Avoid stepping into the void on Skyblox: look further at speed and pick the first safe direction.
+        const edgeLook = 2.2 + Math.hypot(bot.vx, bot.vz) * 0.3;
+        if (!this._hasGroundAhead(bot, inp.yaw, inp.moveX, inp.moveZ, edgeLook)) {
+          ai.strafeDir = -ai.strafeDir;
+          const options = [[-inp.moveX, inp.moveZ], [0, inp.moveZ], [inp.moveX, -0.6], [-inp.moveX, -0.6], [0, -0.6]];
+          const safe = options.find(([mx, mz]) => this._hasGroundAhead(bot, inp.yaw, mx, mz, edgeLook));
+          inp.moveX = safe ? safe[0] : 0;
+          inp.moveZ = safe ? safe[1] : 0;
         }
 
         // Fire when aimed & within effective range (properly tap-firing semi-auto guns!)
@@ -1976,6 +1980,12 @@
         }
         if (Math.random() < 0.48 * dt && bot.grounded) inp.jump = true;
         if (Math.random() < 0.3 * dt && bot.dashCooldown <= 0) inp.dash = true;
+        // Dash/slide/jump carry ~4-7 units of momentum: never launch them toward a drop.
+        if ((inp.dash || inp.crouch || inp.jump) && !this._hasGroundAhead(bot, inp.yaw, inp.moveX, inp.moveZ || (inp.moveX ? 0 : 1), 7)) {
+          inp.dash = false;
+          inp.crouch = false;
+          inp.jump = false;
+        }
       } else {
         // Navigate toward objective / health pickup / waypoint
         let goal = this.map.waypoints[ai.waypointIdx % this.map.waypoints.length];
@@ -2013,21 +2023,27 @@
           ai.stuckTimer = 0;
         }
 
-        if (!this._hasGroundAhead(bot, inp.yaw, 0, 1)) {
+        if (!this._hasGroundAhead(bot, inp.yaw, 0, 1, 2.2 + Math.hypot(bot.vx, bot.vz) * 0.3)) {
           ai.waypointIdx = Math.floor(Math.random() * this.map.waypoints.length);
-          inp.moveZ = -0.5;
+          inp.moveZ = this._hasGroundAhead(bot, inp.yaw, 0, -1) ? -0.5 : 0;
+          inp.jump = false;
         }
       }
     }
 
-    _hasGroundAhead(p, yaw, moveX, moveZ) {
+    _hasGroundAhead(p, yaw, moveX, moveZ, dist = 2.2) {
       if (this.map.id !== 'skyblox') return true;
       const fwdX = Math.sin(yaw);
       const fwdZ = -Math.cos(yaw);
       const rightX = Math.cos(yaw);
       const rightZ = Math.sin(yaw);
-      const probeX = p.x + (fwdX * moveZ + rightX * moveX) * 2.2;
-      const probeZ = p.z + (fwdZ * moveZ + rightZ * moveX) * 2.2;
+      const dirX = fwdX * moveZ + rightX * moveX;
+      const dirZ = fwdZ * moveZ + rightZ * moveX;
+      const len = Math.hypot(dirX, dirZ);
+      if (len < 1e-3) return true; // not moving
+      // Probe a fixed distance along the move direction (small inputs used to probe < 1 unit).
+      const probeX = p.x + (dirX / len) * dist;
+      const probeZ = p.z + (dirZ / len) * dist;
       const res = this.raycastBlocks(probeX, p.y + 1.0, probeZ, 0, -1, 0, 5.5);
       return res.hit;
     }
