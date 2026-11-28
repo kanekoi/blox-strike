@@ -129,6 +129,7 @@
     <div id="respawn-overlay" class="respawn-overlay hidden">
       <div class="respawn-box">
         <div class="respawn-title">SHATTERED!</div>
+        <div id="respawn-killer" class="respawn-killer"></div>
         <div class="respawn-sub">Respawning in <span id="respawn-timer">3.0s</span></div>
       </div>
     </div>
@@ -253,9 +254,10 @@
       <div class="victory-tag">MATCH COMPLETE</div>
       <h2 id="victory-winner" class="victory-winner">BLUE TEAM</h2>
       <p id="victory-reason" class="victory-reason"></p>
+      <p id="victory-mvp" class="victory-mvp"></p>
       <table class="sb-table compact">
         <thead>
-          <tr><th>#</th><th>PLAYER</th><th>LVL</th><th>KILLS</th><th>ASSISTS</th><th>DEATHS</th><th>BOUNTY</th><th>SCORE</th></tr>
+          <tr><th>#</th><th>PLAYER</th><th>LVL</th><th>KILLS</th><th>ASSISTS</th><th>DEATHS</th><th>DMG</th><th>ACC</th><th>BEST</th><th>SCORE</th></tr>
         </thead>
         <tbody id="victory-board-body"></tbody>
       </table>

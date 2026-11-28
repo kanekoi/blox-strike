@@ -851,6 +851,10 @@
       this._updateOverlays();
       document.getElementById('victory-winner').textContent = (snap.winner && snap.winner.name) || 'MATCH COMPLETE';
       document.getElementById('victory-reason').textContent = (snap.winner && snap.winner.reason) || '';
+      const mvp = snap.players.slice().sort((a, b) => b.score - a.score || (b.damageDealt || 0) - (a.damageDealt || 0))[0];
+      document.getElementById('victory-mvp').textContent = mvp
+        ? `★ MVP: ${mvp.name} — ${mvp.score} PTS • ${mvp.damageDealt || 0} DMG • BEST STREAK ${mvp.bestStreak || 0}`
+        : '';
       this._renderScoreboard('victory-board-body');
     }
 
@@ -987,6 +991,20 @@
         this.audio.playBlockShatter(distScale(ev.x, ev.y, ev.z));
         this._pushKillfeed(ev);
 
+        if (ev.victimId === this.localId) {
+          // Respawn screen: who got you, with what, and how much HP they had left.
+          const w = BS.WEAPON_BY_ID[ev.weaponId];
+          const wName = w ? w.shortName : ev.weaponId === 'grenade' ? 'FRAG' : ev.weaponId === 'barrel' ? 'BARREL' : '';
+          let txt;
+          if (!ev.killerId) txt = ev.weaponId === 'void' ? 'FELL INTO THE VOID' : 'SELF-DESTRUCTED';
+          else {
+            txt = `KILLED BY ${ev.killerName}` + (wName ? ` • ${wName}` : '');
+            if (ev.weaponId === 'void') txt = `KNOCKED OFF BY ${ev.killerName}`;
+            if (Number.isFinite(ev.killerHp)) txt += ` • ${ev.killerHp} HP LEFT`;
+          }
+          document.getElementById('respawn-killer').textContent = txt;
+        }
+
         if (Array.isArray(ev.assistIds) && ev.assistIds.includes(this.localId)) {
           this.floatingNumbers.push({
             x: ev.x,
@@ -1077,6 +1095,20 @@
         this.audio.playJumpPad();
       } else if (ev.type === 'dash' && ev.playerId === this.localId) {
         this.audio.playDash();
+      } else if (ev.type === 'doubleJump' && ev.playerId === this.localId) {
+        this.audio.playJumpPad();
+      } else if (ev.type === 'tag') {
+        const confirmed = ev.kind === 'confirmed';
+        this._pushFeedNotice(ev.playerName, ev.playerTeam, confirmed ? '[✔ KILL CONFIRMED]' : '[✖ KILL DENIED]', '', 'ffa', ev.playerId === this.localId);
+        if (ev.playerId === this.localId) {
+          this.audio.playPickup('shield');
+          const cfg = BS.KILL_CONFIRMED || {};
+          this._showBanner(
+            confirmed ? 'KILL CONFIRMED' : 'KILL DENIED',
+            confirmed ? `+${cfg.CONFIRM_SCORE || 50} SCORE • +1 TEAM POINT` : `+${cfg.DENY_SCORE || 25} SCORE • ENEMY POINT DENIED`,
+            1.2
+          );
+        }
       } else if (ev.type === 'pickup' && ev.playerId === this.localId) {
         this.audio.playPickup(ev.pickupType);
         const msg =
@@ -1890,7 +1922,20 @@
         const tdS = document.createElement('td');
         tdS.textContent = String(score);
 
-        tr.append(tdRank, tdPlayer, tdLvl, tdK, tdA, tdD, tdBounty, tdS);
+        if (targetBodyId === 'victory-board-body') {
+          // End-of-match stats instead of the live bounty column.
+          const fired = Number.isFinite(p.shotsFired) ? p.shotsFired : 0;
+          const hit = Number.isFinite(p.shotsHit) ? p.shotsHit : 0;
+          const tdDmg = document.createElement('td');
+          tdDmg.textContent = String(Number.isFinite(p.damageDealt) ? p.damageDealt : 0);
+          const tdAcc = document.createElement('td');
+          tdAcc.textContent = fired > 0 ? Math.min(100, Math.round((hit / fired) * 100)) + '%' : '—';
+          const tdBest = document.createElement('td');
+          tdBest.textContent = String(Number.isFinite(p.bestStreak) ? p.bestStreak : 0);
+          tr.append(tdRank, tdPlayer, tdLvl, tdK, tdA, tdD, tdDmg, tdAcc, tdBest, tdS);
+        } else {
+          tr.append(tdRank, tdPlayer, tdLvl, tdK, tdA, tdD, tdBounty, tdS);
+        }
         frag.appendChild(tr);
       });
       tbody.replaceChildren(frag);

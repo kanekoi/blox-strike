@@ -94,6 +94,7 @@
       this.players = [];
       this.playerMap = Object.create(null);
       this.projectiles = [];
+      this.tags = []; // Kill Confirmed dog tags
       this.pickups = [];
       this.barrels = [];
       this.blocks = [];
@@ -197,6 +198,8 @@
       this.players = [];
       this.playerMap = Object.create(null);
       this.projectiles = [];
+      this.tags = [];
+      this.nextTagId = 1;
       this.events = [];
       this.tick = 0;
       this.time = 0;
@@ -622,6 +625,9 @@
       if (this.mode.id === 'koth') {
         this._updateKoth(dt);
       }
+      if (this.mode.id === 'kc') {
+        this._updateTags(dt);
+      }
 
       return this.events;
     }
@@ -737,6 +743,7 @@
       // Coyote time + Jump buffer (with Slide-Hop momentum boost!)
       if (p.grounded) p.coyote = BS.PLAYER.COYOTE_TIME;
       else p.coyote = Math.max(0, p.coyote - dt);
+      if (p.grounded) p.airJumps = BS.PLAYER.AIR_JUMPS ?? 1;
 
       if (inp.jump) p.jumpBuffer = BS.PLAYER.JUMP_BUFFER;
       else p.jumpBuffer = Math.max(0, p.jumpBuffer - dt);
@@ -757,6 +764,17 @@
         p.coyote = 0;
         p.jumpBuffer = 0;
         jumpedThisTick = true;
+      }
+
+      // Double jump: a fresh jump press in mid-air (holding the key never triggers it).
+      const jumpPressed = inp.jump && !p.prevJumpHeld;
+      p.prevJumpHeld = !!inp.jump;
+      if (!jumpedThisTick && jumpPressed && !p.grounded && p.coyote <= 0 && (p.airJumps || 0) > 0) {
+        p.vy = BS.PLAYER.AIR_JUMP_VEL || 9.8;
+        p.airJumps--;
+        p.jumpBuffer = 0;
+        jumpedThisTick = true;
+        this.events.push({ type: 'doubleJump', playerId: p.id, x: p.x, y: p.y, z: p.z });
       }
 
       // Gravity
@@ -992,6 +1010,7 @@
     }
 
     _fireWeapon(p, w) {
+      p.shotsFired = (p.shotsFired || 0) + 1;
       // Carry the sub-tick leftover so fire rate matches config at 60Hz (LAN) and high-Hz solo alike.
       p.fireCooldown = 1 / w.fireRate + Math.min(0, p.fireCooldown);
       p.recoilKick = Math.min(1, p.recoilKick + w.recoilKick * 2.2);
@@ -1518,6 +1537,7 @@
 
     _applyDamage(attacker, victim, amount, weaponId, headshot, hx, hy, hz) {
       if (!victim.alive || victim.spawnProtect > 0) return;
+      const totalBefore = victim.hp + victim.shield;
       let rem = amount;
       if (victim.shield > 0) {
         const absorbed = Math.min(victim.shield, rem);
@@ -1532,6 +1552,12 @@
         victim.lastHitTime = this.time;
         if (!victim.damagers) victim.damagers = Object.create(null);
         victim.damagers[attacker.id] = (victim.damagers[attacker.id] || 0) + amount;
+        // End-of-match stats: real damage dealt, and accuracy (one hit per fired shot, gun shots only).
+        attacker.damageDealt = (attacker.damageDealt || 0) + (totalBefore - victim.hp - victim.shield);
+        if (weaponId !== 'grenade' && weaponId !== 'barrel' && attacker.lastHitShot !== attacker.shotsFired) {
+          attacker.lastHitShot = attacker.shotsFired;
+          attacker.shotsHit = (attacker.shotsHit || 0) + 1;
+        }
       }
 
       this.events.push({
@@ -1665,6 +1691,8 @@
 
         if (this.matchOver) {
           // Score is frozen once a winner is decided (e.g. two grenades popping in the same tick).
+        } else if (this.mode.id === 'kc') {
+          this._dropTag(victim, killer); // kills only score once the tag is collected
         } else if (this.mode.id === 'tdm') {
           if (killer.team === 'blue') this.scores.blue++;
           else if (killer.team === 'red') this.scores.red++;
@@ -1718,6 +1746,7 @@
         assistName,
         assistXp: prog.ASSIST_XP || 25,
         killerId: killer ? killer.id : null,
+        killerHp: killer && killer.alive ? Math.round(killer.hp) : null,
         // Null killer = void fall or self-damage (own rocket/grenade): credit the void only for falls.
         killerName: killer ? killer.name : weaponId === 'void' ? 'THE VOID' : victim.name,
         killerTeam: killer ? killer.team : weaponId === 'void' ? 'void' : victim.team,
@@ -1779,6 +1808,56 @@
             const gain = pk.type === 'health' ? p.hp - hpBefore : pk.type === 'shield' ? p.shield - shieldBefore : 0;
             this.events.push({ type: 'pickup', playerId: p.id, pickupType: pk.type, gain, x: pk.x, y: pk.y, z: pk.z });
           }
+        }
+      }
+    }
+
+    // --- Kill Confirmed ---
+    _dropTag(victim, killer) {
+      const floor = this.raycastBlocks(victim.x, victim.y + 0.5, victim.z, 0, -1, 0, 30);
+      if (!floor.hit) {
+        // Died over the void: nothing to pick up, so the kill confirms itself.
+        this._scoreTag(killer, victim.team, true);
+        return;
+      }
+      this.tags.push({
+        id: this.nextTagId++,
+        x: victim.x,
+        y: victim.y + 0.5 - floor.dist,
+        z: victim.z,
+        team: victim.team,
+        life: (BS.KILL_CONFIRMED && BS.KILL_CONFIRMED.TAG_LIFE) || 25,
+      });
+    }
+
+    _scoreTag(p, tagTeam, confirmed) {
+      const cfg = BS.KILL_CONFIRMED || {};
+      if (confirmed) {
+        if (p.team === 'blue' || p.team === 'red') this.scores[p.team]++;
+        p.score += cfg.CONFIRM_SCORE || 50;
+        this._grantXP(p, cfg.CONFIRM_XP || 30, 'confirm');
+      } else {
+        p.score += cfg.DENY_SCORE || 25;
+        this._grantXP(p, cfg.DENY_XP || 15, 'deny');
+      }
+      this.events.push({ type: 'tag', kind: confirmed ? 'confirmed' : 'denied', playerId: p.id, playerName: p.name, playerTeam: p.team, tagTeam });
+      if (this.scores.blue >= this.mode.scoreLimit) this._finishMatch('BLUE TEAM', 'Confirmed the most kills!');
+      else if (this.scores.red >= this.mode.scoreLimit) this._finishMatch('RED TEAM', 'Confirmed the most kills!');
+    }
+
+    _updateTags(dt) {
+      for (let i = this.tags.length - 1; i >= 0; i--) {
+        const t = this.tags[i];
+        t.life -= dt;
+        let taker = null;
+        for (const p of this.players) {
+          if (p.alive && Math.hypot(p.x - t.x, p.z - t.z) < 1.4 && Math.abs(p.y - t.y) < 2) { taker = p; break; }
+        }
+        if (taker) {
+          this.tags.splice(i, 1);
+          if (!this.matchOver) this._scoreTag(taker, t.team, taker.team !== t.team);
+        } else if (t.life <= 0) {
+          this.tags.splice(i, 1);
         }
       }
     }
@@ -2041,6 +2120,13 @@
           if (hpPick) goal = hpPick;
         } else if (this.mode.id === 'koth' && Math.random() < 0.7) {
           goal = this.map.kothZone;
+        } else if (this.mode.id === 'kc' && this.tags.length) {
+          // Go confirm (enemy tag) or deny (own team's tag), whichever is closest.
+          let best = 30;
+          for (const t of this.tags) {
+            const d = Math.hypot(t.x - bot.x, t.z - bot.z);
+            if (d < best) { best = d; goal = t; }
+          }
         }
 
         const dx = goal.x - bot.x;
@@ -2165,6 +2251,10 @@
           assists: p.assists || 0,
           deaths: p.deaths,
           streak: p.streak,
+          bestStreak: p.bestStreak || 0,
+          damageDealt: Math.round(p.damageDealt || 0),
+          shotsFired: p.shotsFired || 0,
+          shotsHit: p.shotsHit || 0,
           score: p.score,
           level: p.level || 1,
           xp: Math.floor(p.xp || 0),
@@ -2172,6 +2262,7 @@
           bounty: p.bounty || 0,
           gunGameTier: p.gunGameTier,
         })),
+        tags: this.tags.map((t) => ({ id: t.id, x: t.x, y: t.y, z: t.z, team: t.team })),
         projectiles: this.projectiles.map((pr) => ({
           id: pr.id,
           kind: pr.kind || 'rocket',

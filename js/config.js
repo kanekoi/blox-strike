@@ -22,6 +22,8 @@
     JUMP_BUFFER: 0.12,
     GRAVITY: 25.5,
     JUMP_VEL: 10.6,
+    AIR_JUMPS: 1, // double jump: extra jumps allowed in mid-air
+    AIR_JUMP_VEL: 9.8,
     DASH_SPEED: 19.5,
     DASH_DURATION: 0.18,
     DASH_COOLDOWN: 2.2,
@@ -431,6 +433,23 @@
       timeLimit: 300,
       teams: true,
     },
+    kc: {
+      id: 'kc',
+      name: 'Kill Confirmed',
+      short: 'KC',
+      description: 'Kills drop blox tags. Grab enemy tags to score, grab your team’s to deny. First to 25!',
+      scoreLimit: 25,
+      timeLimit: 300,
+      teams: true,
+    },
+  };
+
+  BS.KILL_CONFIRMED = {
+    TAG_LIFE: 25, // seconds a dropped tag stays before vanishing
+    CONFIRM_SCORE: 50,
+    CONFIRM_XP: 30,
+    DENY_SCORE: 25,
+    DENY_XP: 15,
   };
 
   BS.SKINS = [

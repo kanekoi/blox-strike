@@ -226,6 +226,80 @@ const tests = {
     assert(!thrown, 'queued grenade fired on respawn');
   },
 
+  'kill event carries killer HP; stats track damage and accuracy'() {
+    const sim = newSim();
+    const k = addPlayer(sim, 'k'), v = addPlayer(sim, 'v');
+    v.alive = true; v.spawnProtect = 0; v.hp = 100; v.shield = 0; k.hp = 70;
+    k.shotsFired = 2;
+    sim._applyDamage(k, v, 30, 'ar', false, 0, 0, 0);
+    sim._applyDamage(k, v, 30, 'ar', false, 0, 0, 0); // same shot: still 1 hit
+    sim.events.length = 0;
+    k.shotsFired = 3;
+    sim._applyDamage(k, v, 500, 'ar', false, 0, 0, 0);
+    const kill = sim.events.find((e) => e.type === 'kill');
+    assert.strictEqual(kill.killerHp, 80, 'killer HP after +10 heal');
+    assert.strictEqual(k.damageDealt, 100, 'overkill must not count');
+    assert.strictEqual(k.shotsHit, 2);
+    const snap = sim.getSnapshot().players.find((p) => p.id === 'k');
+    assert.strictEqual(snap.damageDealt, 100);
+    assert.strictEqual(snap.shotsHit, 2);
+  },
+
+  'double jump: one fresh press in mid-air, none while holding'() {
+    const sim = newSim();
+    const p = addPlayer(sim, 'h');
+    for (let i = 0; i < 300; i++) sim.step(DT);
+    const press = (jump, seq) => { sim.setPlayerInput('h', input({ seq, jump })); return sim.step(DT) || []; };
+    press(true, 1); // ground jump
+    let dj = 0;
+    for (let i = 0; i < 10; i++) dj += press(true, 2 + i).filter((e) => e.type === 'doubleJump').length; // held
+    assert.strictEqual(dj, 0, 'holding jump must not double jump');
+    press(false, 20);
+    dj = press(true, 21).filter((e) => e.type === 'doubleJump').length;
+    assert.strictEqual(dj, 1, 'fresh press in air should double jump');
+    press(false, 22);
+    dj = press(true, 23).filter((e) => e.type === 'doubleJump').length;
+    assert.strictEqual(dj, 0, 'only one air jump');
+  },
+
+  'kill confirmed: kills drop tags; enemy confirms, teammate denies'() {
+    const sim = newSim({ modeId: 'kc', mapId: 'crossroads' });
+    const b = addPlayer(sim, 'b', 'blue'), r = addPlayer(sim, 'r', 'red'), r2 = addPlayer(sim, 'r2', 'red');
+    for (let i = 0; i < 3; i++) sim.step(DT);
+    for (const p of [b, r, r2]) { p.x = 30; p.z = 30; p.y = 50; p.vy = 0; } // park everyone away, mid-air
+    const placeAt = (p, t) => { p.x = t.x; p.z = t.z; p.y = t.y; };
+    // blue kills red on the ground: no team point yet, a red tag appears
+    r.x = 0; r.z = -5; r.y = 0.2;
+    sim._killPlayer(r, b, 'ar', false);
+    assert.strictEqual(sim.scores.blue, 0, 'kill alone must not score');
+    assert.strictEqual(sim.tags.length, 1);
+    assert.strictEqual(sim.tags[0].team, 'red');
+    b.alive = true; placeAt(b, sim.tags[0]);
+    sim._updateTags(DT);
+    assert.strictEqual(sim.scores.blue, 1, 'enemy tag should confirm');
+    assert.strictEqual(sim.tags.length, 0);
+    // another red dies; red teammate grabs it: denied, no score
+    r.alive = true; r.x = 0; r.z = -5; r.y = 0.2;
+    sim._killPlayer(r, b, 'ar', false);
+    b.x = 30; b.y = 50;
+    r2.alive = true; placeAt(r2, sim.tags[0]);
+    sim._updateTags(DT);
+    assert.strictEqual(sim.scores.blue, 1);
+    assert.strictEqual(sim.scores.red, 0);
+    assert.strictEqual(sim.tags.length, 0);
+  },
+
+  'kill confirmed full bot match scores and ends cleanly'() {
+    const sim = newSim({ modeId: 'kc', botCount: 7, mapId: 'neon' });
+    let confirms = 0;
+    for (let i = 0; i < 60 * 300 && !sim.matchOver; i++) {
+      for (const e of sim.step(DT) || []) if (e.type === 'tag' && e.kind === 'confirmed') confirms++;
+    }
+    assert(confirms > 5, `bots confirmed only ${confirms} kills in a full match`);
+    assert(sim.matchOver);
+    assert(sim.tags.every((t) => Number.isFinite(t.x + t.y + t.z)));
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');

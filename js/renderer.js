@@ -1808,6 +1808,19 @@
         });
       }
 
+      // Kill Confirmed tags: spinning, bobbing team-colored blox with a glow ring
+      if (snapshot.tags) {
+        for (let i = 0; i < snapshot.tags.length; i++) {
+          const t = snapshot.tags[i];
+          const col = t.team === 'blue' ? [0.25, 0.7, 1.0] : t.team === 'red' ? [1.0, 0.32, 0.38] : [1.0, 0.84, 0.2];
+          const bob = Math.sin(snapshot.time * 4 + t.id) * 0.15;
+          const spin = snapshot.time * 2.6 + t.id;
+          this._drawBox(t.x, t.y + 0.75 + bob, t.z, 0.6, spin, 0.6, 0.38, 0.38, 0.38, col, 2, 0.9);
+          this._drawBox(t.x, t.y + 0.75 + bob, t.z, 0.6, spin, 0.6, 0.2, 0.46, 0.2, [1, 1, 1], 2, 1.0);
+          this._drawBox(t.x, t.y + 0.04, t.z, 0, spin * 0.5, 0, 1.1, 0.04, 1.1, col, 2, 0.7);
+        }
+      }
+
       // Draw Pickup Spawner Glow Pads & Floating Custom Models (dark bases are in static batch)
       const pickupModels = BS.MODELS && BS.MODELS.pickups;
       for (let i = 0; i < snapshot.pickups.length; i++) {

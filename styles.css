@@ -1,5 +1,19 @@
 /* Blox Strike — Modern Roblox-Inspired Arcade Shooter UI */
 
+.respawn-killer {
+  margin: 6px 0 4px;
+  color: #ffd166;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.victory-mvp {
+  margin: 4px 0 10px;
+  color: #ffd166;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
 .menu-status {
   margin-top: 8px;
   color: #ff6b6b;
