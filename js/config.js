@@ -225,6 +225,9 @@
     MAX_LEVEL: 25,
     KILL_XP: 60,
     KILL_HEAL: 10, // HP the killer regains on every kill (capped at max HP)
+    ASSIST_XP: 25,
+    ASSIST_MIN_DAMAGE: 25, // damage to one life needed to earn an assist
+    KNOCKOFF_CREDIT_TIME: 5, // seconds: a void fall after your hit counts as your kill
     HEADSHOT_BONUS_XP: 25,
     NOTORIETY_KILL_XP: 15,
     BOUNTY_MIN_STREAK: 3,

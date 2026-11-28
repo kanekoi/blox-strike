@@ -142,6 +142,90 @@ const tests = {
     assert.strictEqual(k.hp, k.maxHp, 'heal overflowed max HP');
   },
 
+  'knocking someone into the void credits the attacker'() {
+    const sim = newSim({ mapId: 'skyblox' });
+    const a = addPlayer(sim, 'a'), v = addPlayer(sim, 'v');
+    for (let i = 0; i < 5; i++) sim.step(DT);
+    a.spawnProtect = v.spawnProtect = 0;
+    sim._applyDamage(a, v, 10, 'ar', false, v.x, v.y, v.z);
+    v.y = sim.map.voidY - 1; v.vy = -5;
+    let kill = null;
+    for (let i = 0; i < 5 && !kill; i++) kill = (sim.step(DT) || []).find((e) => e.type === 'kill' && e.victimId === 'v');
+    assert(kill, 'no void kill');
+    assert.strictEqual(kill.killerId, 'a');
+    assert.strictEqual(a.kills, 1);
+  },
+
+  'old hits do not credit a void fall'() {
+    const sim = newSim({ mapId: 'skyblox' });
+    const a = addPlayer(sim, 'a'), v = addPlayer(sim, 'v');
+    for (let i = 0; i < 5; i++) sim.step(DT);
+    a.spawnProtect = v.spawnProtect = 0;
+    sim._applyDamage(a, v, 10, 'ar', false, v.x, v.y, v.z);
+    v.lastHitTime -= 10;
+    v.y = sim.map.voidY - 1;
+    let kill = null;
+    for (let i = 0; i < 5 && !kill; i++) kill = (sim.step(DT) || []).find((e) => e.type === 'kill' && e.victimId === 'v');
+    assert.strictEqual(kill.killerName, 'THE VOID');
+  },
+
+  'assists go to other damagers with enough damage'() {
+    const sim = newSim();
+    const k = addPlayer(sim, 'k'), helper = addPlayer(sim, 'helper'), tiny = addPlayer(sim, 'tiny'), v = addPlayer(sim, 'v');
+    v.alive = true; v.spawnProtect = 0; v.hp = 100;
+    sim._applyDamage(helper, v, 40, 'ar', false, 0, 0, 0);
+    sim._applyDamage(tiny, v, 10, 'ar', false, 0, 0, 0);
+    sim.events.length = 0;
+    sim._applyDamage(k, v, 200, 'ar', false, 0, 0, 0);
+    const kill = sim.events.find((e) => e.type === 'kill');
+    assert.deepStrictEqual(kill.assistIds, ['helper']);
+    assert.strictEqual(kill.assistName, 'helper');
+    assert.strictEqual(helper.assists, 1);
+    assert(!tiny.assists, 'tiny damage should not assist');
+    assert(!k.assists, 'killer should not also assist');
+  },
+
+  'posthumous kill scores but does not build streak or heal'() {
+    const sim = newSim();
+    const k = addPlayer(sim, 'k'), v = addPlayer(sim, 'v');
+    k.alive = false; k.hp = 0;
+    sim._killPlayer(v, k, 'barrel', false);
+    assert.strictEqual(k.kills, 1);
+    assert.strictEqual(k.streak, 0);
+    assert.strictEqual(k.hp, 0);
+  },
+
+  'TDM score freezes once a winner is decided'() {
+    const sim = newSim({ modeId: 'tdm' });
+    const b = addPlayer(sim, 'b', 'blue'), r = addPlayer(sim, 'r', 'red'), v1 = addPlayer(sim, 'v1', 'red'), v2 = addPlayer(sim, 'v2', 'blue');
+    sim.scores.blue = sim.mode.scoreLimit - 1; sim.scores.red = sim.mode.scoreLimit - 1;
+    sim._killPlayer(v1, b, 'grenade', false);
+    sim._killPlayer(v2, r, 'grenade', false);
+    assert(sim.matchOver);
+    assert(sim.scores.blue > sim.scores.red, `winner behind: ${sim.scores.blue}-${sim.scores.red}`);
+  },
+
+  'KOTH timeout with equal whole points is a draw'() {
+    const sim = newSim({ modeId: 'koth' });
+    sim.scores.blue = 9.9; sim.scores.red = 9.9 + 1.6e-14;
+    sim._endMatchByTime();
+    assert.strictEqual(sim.winner.name, 'DRAW');
+  },
+
+  'grenade tapped while dead is not thrown on respawn'() {
+    const sim = newSim();
+    const p = addPlayer(sim, 'h');
+    for (let i = 0; i < 300; i++) sim.step(DT);
+    sim._killPlayer(p, null, 'void', false);
+    sim.setPlayerInput('h', input({ seq: 1, grenade: true }));
+    let thrown = false;
+    for (let i = 0; i < 600; i++) {
+      sim.step(DT);
+      if (p.alive && p.grenadeCooldown > 0) thrown = true;
+    }
+    assert(!thrown, 'queued grenade fired on respawn');
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');

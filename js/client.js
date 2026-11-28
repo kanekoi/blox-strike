@@ -242,7 +242,7 @@
     _bindTransport() {
       this.transport.onSnapshot((snap) => {
         this.snapshot = snap;
-        if (this.state === 'playing' && snap.matchOver) {
+        if ((this.state === 'playing' || this.state === 'paused') && snap.matchOver) {
           this._onMatchOver(snap);
         }
       });
@@ -975,7 +975,7 @@
           this.audio.playHurt();
           const attacker = this.snapshot && this.snapshot.players.find((p) => p.id === ev.attackerId);
           if (attacker) {
-            this.damageIndicators.push({ x: attacker.x, z: attacker.z, life: 0.9, maxLife: 0.9 });
+            this.damageIndicators.push({ x: attacker.x, z: attacker.z, life: 1.2, maxLife: 1.2 });
           }
         }
       } else if (ev.type === 'kill') {
@@ -984,6 +984,18 @@
         }
         this.audio.playBlockShatter(distScale(ev.x, ev.y, ev.z));
         this._pushKillfeed(ev);
+
+        if (Array.isArray(ev.assistIds) && ev.assistIds.includes(this.localId)) {
+          this.floatingNumbers.push({
+            x: ev.x,
+            y: ev.y + 0.85,
+            z: ev.z,
+            text: `ASSIST +${ev.assistXp || 25} XP`,
+            crit: false,
+            life: 1.05,
+            maxLife: 1.05,
+          });
+        }
 
         if (ev.killerId === this.localId) {
           this.hitmarkerTimer = 0.26;
@@ -1097,7 +1109,14 @@
       vSpan.className = teamCls(ev.victimTeam);
       vSpan.textContent = String(ev.victimName || 'UNKNOWN');
 
-      row.append(kSpan, wSpan, vSpan);
+      if (ev.assistName) {
+        const aSpan = document.createElement('span');
+        aSpan.className = 'kf-weapon';
+        aSpan.textContent = `+ ${ev.assistName}`;
+        row.append(kSpan, aSpan, wSpan, vSpan);
+      } else {
+        row.append(kSpan, wSpan, vSpan);
+      }
       feed.prepend(row);
       while (feed.children.length > 5) {
         feed.removeChild(feed.lastChild);
@@ -1712,6 +1731,15 @@
         ctx.beginPath();
         ctx.arc(0, 0, 74, rel - 0.32, rel + 0.32);
         ctx.stroke();
+        // Arrowhead pointing outward toward the attacker
+        ctx.rotate(rel);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.beginPath();
+        ctx.moveTo(96, 0);
+        ctx.lineTo(80, -10);
+        ctx.lineTo(80, 10);
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
       }
     }
@@ -1844,6 +1872,8 @@
 
         const tdK = document.createElement('td');
         tdK.textContent = String(kills);
+        const tdA = document.createElement('td');
+        tdA.textContent = String(Number.isFinite(p.assists) ? p.assists : 0);
         const tdD = document.createElement('td');
         tdD.textContent = String(deaths);
         const tdBounty = document.createElement('td');
@@ -1852,7 +1882,7 @@
         const tdS = document.createElement('td');
         tdS.textContent = String(score);
 
-        tr.append(tdRank, tdPlayer, tdLvl, tdK, tdD, tdBounty, tdS);
+        tr.append(tdRank, tdPlayer, tdLvl, tdK, tdA, tdD, tdBounty, tdS);
         frag.appendChild(tr);
       });
       tbody.replaceChildren(frag);

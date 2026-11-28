@@ -102,6 +102,19 @@ function addHuman(c) {
   }
 }
 
+// A human left: put a bot back on the smaller team so the lobby stays at its size.
+function refillBot() {
+  if (sim.players.length >= lobbySize) return;
+  const count = (t) => sim.players.filter((q) => q.team === t).length;
+  const team = !sim.mode.teams ? 'ffa' : count('blue') <= count('red') ? 'blue' : 'red';
+  const used = new Set(sim.players.map((q) => q.name));
+  const name = BS.BOT_NAMES.find((n) => !used.has(n)) || 'BloxBot';
+  const skin = BS.SKINS[Math.floor(Math.random() * BS.SKINS.length)];
+  const bot = sim._createPlayer('bot_r' + nextId++, name, team, true, skin, skin.accessory || 'hair_classic', 'default');
+  sim._addPlayer(bot);
+  sim._spawnPlayer(bot, sim.players.length);
+}
+
 function startMatch() {
   // demoMode makes the sim's built-in local slot a bot; we drop it and add the real humans instead.
   sim.startMatch({ ...matchOpts, demoMode: true });
@@ -179,6 +192,7 @@ wss.on('connection', (ws, req) => {
     if (!client) return;
     clients.delete(ws);
     removePlayer(client.id);
+    if (clients.size > 0) refillBot(); // keep teams even when humans leave mid-match
     console.log(`${client.opts.playerName || 'BloxPlayer'} left (${clients.size} online)`);
     if (clients.size === 0) {
       // Empty server: next player to join starts a fresh match with their own settings.

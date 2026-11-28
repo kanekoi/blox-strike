@@ -486,6 +486,8 @@
       p.input.pitch = 0;
       p.hp = p.maxHp || BS.PLAYER.MAX_HP;
       p.shield = 0;
+      p.damagers = Object.create(null);
+      p.lastHitBy = null;
       p.alive = true;
       p.respawnTimer = 0;
       p.spawnProtect = BS.PLAYER.SPAWN_PROTECT;
@@ -561,8 +563,11 @@
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         if (!p.alive) {
-          p.input.fireTap = false; // taps pressed while dead must not fire/hop on respawn
+          p.input.fireTap = false; // taps pressed while dead must not fire/hop/throw on respawn
           p.input.jumpTap = false;
+          p.input.grenade = false;
+          p.input.dash = false;
+          p.input.reload = false;
           // Allow human players to select their next weapon even during respawn countdown!
           if (!p.isBot) this._applyWeaponSlotSwitch(p);
           p.respawnTimer -= dt;
@@ -604,7 +609,9 @@
 
         // Void death check (e.g. falling off Skyblox Islands)
         if (p.y < this.map.voidY) {
-          this._killPlayer(p, null, 'void', false);
+          // Knocked off by someone recently? They get the kill.
+          const recent = p.lastHitBy && this.time - p.lastHitTime <= ((BS.PROGRESSION && BS.PROGRESSION.KNOCKOFF_CREDIT_TIME) || 5);
+          this._killPlayer(p, recent ? this.playerMap[p.lastHitBy] || null : null, 'void', false);
         }
       }
 
@@ -1519,6 +1526,13 @@
       }
       victim.hp = Math.max(0, victim.hp - rem);
       victim.hurtFlash = 1.0;
+      if (attacker && attacker !== victim) {
+        // For knock-off kill credit and assists.
+        victim.lastHitBy = attacker.id;
+        victim.lastHitTime = this.time;
+        if (!victim.damagers) victim.damagers = Object.create(null);
+        victim.damagers[attacker.id] = (victim.damagers[attacker.id] || 0) + amount;
+      }
 
       this.events.push({
         type: 'hit',
@@ -1589,7 +1603,8 @@
 
       if (killer && killer.id !== victim.id) {
         killer.kills++;
-        killer.streak++;
+        // Posthumous kills (e.g. a dead shooter's barrel) still score, but don't build a streak/bounty or heal.
+        if (killer.alive) killer.streak++;
         if (killer.streak > killer.bestStreak) killer.bestStreak = killer.streak;
         killer.score += headshot ? 125 : 100;
         streak = killer.streak;
@@ -1597,7 +1612,7 @@
         // Small heal-on-kill momentum (RIVALS / Arsenal vibe!)
         const killerMaxHp = killer.maxHp || BS.PLAYER.MAX_HP;
         const hpBefore = killer.hp;
-        killer.hp = Math.min(killerMaxHp, killer.hp + (prog.KILL_HEAL ?? 10));
+        if (killer.alive) killer.hp = Math.min(killerMaxHp, killer.hp + (prog.KILL_HEAL ?? 10));
         healed = killer.hp - hpBefore;
 
         // Award kill XP + headshot bonus + notoriety bonus
@@ -1648,7 +1663,9 @@
 
         this._grantXP(killer, xpEarned, bountyClaimed > 0 ? 'bounty' : 'kill');
 
-        if (this.mode.id === 'tdm') {
+        if (this.matchOver) {
+          // Score is frozen once a winner is decided (e.g. two grenades popping in the same tick).
+        } else if (this.mode.id === 'tdm') {
           if (killer.team === 'blue') this.scores.blue++;
           else if (killer.team === 'red') this.scores.red++;
           if (this.scores.blue >= this.mode.scoreLimit) {
@@ -1679,8 +1696,27 @@
         }
       }
 
+      // Assists: anyone else who dealt enough damage to this life gets XP + score.
+      const assistIds = [];
+      let assistName = null;
+      const dmgBy = victim.damagers || {};
+      for (const id in dmgBy) {
+        const a = this.playerMap[id];
+        if (!a || a === victim || (killer && a === killer) || dmgBy[id] < (prog.ASSIST_MIN_DAMAGE || 25)) continue;
+        a.assists = (a.assists || 0) + 1;
+        a.score += 50;
+        this._grantXP(a, prog.ASSIST_XP || 25, 'assist');
+        assistIds.push(a.id);
+        if (!assistName) assistName = a.name;
+      }
+      victim.damagers = Object.create(null);
+      victim.lastHitBy = null;
+
       this.events.push({
         type: 'kill',
+        assistIds,
+        assistName,
+        assistXp: prog.ASSIST_XP || 25,
         killerId: killer ? killer.id : null,
         // Null killer = void fall or self-damage (own rocket/grenade): credit the void only for falls.
         killerName: killer ? killer.name : weaponId === 'void' ? 'THE VOID' : victim.name,
@@ -1799,8 +1835,11 @@
 
     _endMatchByTime() {
       if (this.mode.teams) {
-        if (this.scores.blue > this.scores.red) this._finishMatch('BLUE TEAM', 'Time expired — Blue leads!');
-        else if (this.scores.red > this.scores.blue) this._finishMatch('RED TEAM', 'Time expired — Red leads!');
+        // Compare whole points, as the HUD shows them: KOTH float dust must not break a visible tie.
+        const blue = Math.floor(this.scores.blue + 1e-9);
+        const red = Math.floor(this.scores.red + 1e-9);
+        if (blue > red) this._finishMatch('BLUE TEAM', 'Time expired — Blue leads!');
+        else if (red > blue) this._finishMatch('RED TEAM', 'Time expired — Red leads!');
         else this._finishMatch('DRAW', 'Time expired — Tied match!');
       } else {
         // Same tiebreak as the client scoreboard, so the winner is the player ranked first.
@@ -2120,6 +2159,7 @@
           hurtFlash: p.hurtFlash,
           ads: p.input.ads,
           kills: p.kills,
+          assists: p.assists || 0,
           deaths: p.deaths,
           streak: p.streak,
           score: p.score,
