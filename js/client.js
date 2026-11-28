@@ -208,7 +208,7 @@
             ? saved.weaponSkinId
             : defaults.weaponSkinId;
         const sensitivity = Number.isFinite(saved.sensitivity)
-          ? Math.max(0.0005, Math.min(0.008, saved.sensitivity))
+          ? Math.max(0.00055, Math.min(0.0055, saved.sensitivity)) // slider range: 25%–250% of 0.0022
           : defaults.sensitivity;
         const volume = Number.isFinite(saved.volume)
           ? Math.max(0, Math.min(1, saved.volume))
@@ -639,12 +639,14 @@
           this.keys = {};
           this.mouseDown.left = false;
           this.mouseDown.right = false;
-          // LAN server keeps running while paused: send one all-released input so the avatar stops
-          if (this.lanMode && this.localId) this._sendLocalInput(0, true);
+          // Clear taps BEFORE the forced send, or the "all-released" packet still throws/jumps/dashes.
           this.pendingFire = false;
           this.pendingJump = false;
           this.pendingDash = false;
           this.pendingGrenade = false;
+          this.pendingReload = false;
+          // LAN server keeps running while paused: send one all-released input so the avatar stops
+          if (this.lanMode && this.localId) this._sendLocalInput(0, true);
           this._updateOverlays();
         }
       });
@@ -1015,8 +1017,13 @@
             });
           }
           const streakTitle = STREAK_LABELS[ev.streak];
+          const wanted = this._wanted && this._wanted.streak === ev.streak ? this._wanted : null;
+          this._wanted = null;
           if (streakTitle) {
-            this._showBanner(streakTitle, ev.headshot ? 'HEADSHOT ELIMINATION!' : `${ev.streak} KO STREAK`);
+            const sub = wanted ? `WANTED! • ${wanted.bounty} XP BOUNTY` : ev.headshot ? 'HEADSHOT ELIMINATION!' : `${ev.streak} KO STREAK`;
+            this._showBanner(streakTitle, sub, wanted ? 1.7 : undefined);
+          } else if (wanted) {
+            // keep the WANTED banner
           } else if (ev.headshot) {
             this._showBanner('HEADSHOT KO!', `+${ev.xpEarned || 85} XP • ${ev.victimName}`);
           }
@@ -1038,6 +1045,7 @@
         this._pushFeedNotice(ev.playerName, ev.playerTeam, `★ WANTED [+${ev.bounty} XP]`, `${ev.streak} STREAK`);
         if (ev.playerId === this.localId) {
           this._showBanner(`WANTED! • ${ev.bounty} XP BOUNTY`, `${ev.streak} STREAK — SURVIVE FOR BONUS XP!`, 1.7);
+          this._wanted = { streak: ev.streak, bounty: ev.bounty }; // the kill event right after must not overwrite this
         }
       } else if (ev.type === 'bountyClaimed') {
         this._pushFeedNotice(ev.killerName, ev.killerTeam, `[★ BOUNTY +${ev.bounty} XP]`, ev.victimName, ev.victimTeam, true);
@@ -1073,9 +1081,9 @@
         this.audio.playPickup(ev.pickupType);
         const msg =
           ev.pickupType === 'health'
-            ? '+45 HEALTH'
+            ? `+${ev.gain ?? 45} HEALTH`
             : ev.pickupType === 'shield'
-            ? '+50 SHIELD'
+            ? `+${ev.gain ?? 50} SHIELD`
             : 'SPEED BOOST!';
         this._showBanner(msg, 'POWERUP COLLECTED', 1.1);
       } else if (ev.type === 'reload' && ev.playerId === this.localId) {

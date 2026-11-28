@@ -1761,6 +1761,8 @@
         if (dist < 1.35) {
           let used = false;
           const maxHp = p.maxHp || BS.PLAYER.MAX_HP;
+          const hpBefore = p.hp;
+          const shieldBefore = p.shield;
           if (pk.type === 'health' && p.hp < maxHp) {
             p.hp = Math.min(maxHp, p.hp + 45);
             used = true;
@@ -1774,7 +1776,8 @@
           if (used) {
             pk.active = false;
             pk.respawnTimer = 11.0;
-            this.events.push({ type: 'pickup', playerId: p.id, pickupType: pk.type, x: pk.x, y: pk.y, z: pk.z });
+            const gain = pk.type === 'health' ? p.hp - hpBefore : pk.type === 'shield' ? p.shield - shieldBefore : 0;
+            this.events.push({ type: 'pickup', playerId: p.id, pickupType: pk.type, gain, x: pk.x, y: pk.y, z: pk.z });
           }
         }
       }

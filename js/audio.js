@@ -45,7 +45,8 @@
     }
 
     _noise(duration, filterType, freq, q, gainStart, gainEnd = 0.001, delay = 0) {
-      if (!this.ctx || !this.noiseBuffer) return;
+      // Suspended context: skip, or every shot queues up and plays as one burst on resume.
+      if (!this.ctx || !this.noiseBuffer || this.ctx.state !== 'running') return;
       const t = this.ctx.currentTime + delay;
       const src = this.ctx.createBufferSource();
       src.buffer = this.noiseBuffer;
@@ -68,7 +69,7 @@
     }
 
     _tone(type, fStart, fEnd, duration, gainStart, gainEnd = 0.001, delay = 0) {
-      if (!this.ctx) return;
+      if (!this.ctx || this.ctx.state !== 'running') return;
       const t = this.ctx.currentTime + delay;
       const osc = this.ctx.createOscillator();
       osc.type = type;
