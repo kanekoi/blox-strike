@@ -994,7 +994,9 @@
               x: ev.x,
               y: ev.y + 0.85,
               z: ev.z,
-              text: ev.bountyClaimed > 0 ? `+${ev.xpEarned} XP (BOUNTY!)` : `+${ev.xpEarned} XP`,
+              text:
+                (ev.bountyClaimed > 0 ? `+${ev.xpEarned} XP (BOUNTY!)` : `+${ev.xpEarned} XP`) +
+                (ev.healed > 0 ? ` • +${ev.healed} HP` : ''),
               crit: true,
               life: 1.05,
               maxLife: 1.05,

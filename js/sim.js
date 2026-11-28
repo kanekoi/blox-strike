@@ -1585,6 +1585,7 @@
       let streak = 0;
       let xpEarned = 0;
       let bountyClaimed = 0;
+      let healed = 0;
 
       if (killer && killer.id !== victim.id) {
         killer.kills++;
@@ -1595,7 +1596,9 @@
 
         // Small heal-on-kill momentum (RIVALS / Arsenal vibe!)
         const killerMaxHp = killer.maxHp || BS.PLAYER.MAX_HP;
-        killer.hp = Math.min(killerMaxHp, killer.hp + 15);
+        const hpBefore = killer.hp;
+        killer.hp = Math.min(killerMaxHp, killer.hp + (prog.KILL_HEAL ?? 10));
+        healed = killer.hp - hpBefore;
 
         // Award kill XP + headshot bonus + notoriety bonus
         xpEarned = (prog.KILL_XP || 60) + (headshot ? prog.HEADSHOT_BONUS_XP || 25 : 0);
@@ -1690,6 +1693,7 @@
         streak,
         xpEarned,
         bountyClaimed,
+        healed,
         x: victim.x,
         y: victim.y + 1.0,
         z: victim.z,

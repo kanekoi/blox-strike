@@ -128,6 +128,20 @@ const tests = {
     assert.strictEqual(sim.winner.name, 'B');
   },
 
+  'every kill heals the killer by KILL_HEAL, capped at max HP'() {
+    const sim = newSim();
+    const k = addPlayer(sim, 'k'), v = addPlayer(sim, 'v');
+    k.hp = 50;
+    sim.events.length = 0;
+    sim._killPlayer(v, k, 'ar', false);
+    assert.strictEqual(k.hp, 50 + BS.PROGRESSION.KILL_HEAL);
+    assert.strictEqual(sim.events.find((e) => e.type === 'kill').healed, BS.PROGRESSION.KILL_HEAL);
+    v.alive = true;
+    k.hp = k.maxHp - 3;
+    sim._killPlayer(v, k, 'ar', false);
+    assert.strictEqual(k.hp, k.maxHp, 'heal overflowed max HP');
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');

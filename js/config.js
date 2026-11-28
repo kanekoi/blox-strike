@@ -224,6 +224,7 @@
     XP_PER_LEVEL_STEP: 35,
     MAX_LEVEL: 25,
     KILL_XP: 60,
+    KILL_HEAL: 10, // HP the killer regains on every kill (capped at max HP)
     HEADSHOT_BONUS_XP: 25,
     NOTORIETY_KILL_XP: 15,
     BOUNTY_MIN_STREAK: 3,
