@@ -885,10 +885,11 @@
         { m: 'rock', x: 24, y: -3.5, z: 0, s: 1.3 },
       ],
       jumpPads: [
-        { x: -7, y: 0.1, z: -21, r: 1.5, boostY: 14.5, boostX: -5.5, boostZ: 7.5 },
-        { x: 7, y: 0.1, z: -21, r: 1.5, boostY: 14.5, boostX: 5.5, boostZ: 7.5 },
-        { x: -7, y: 0.1, z: 21, r: 1.5, boostY: 14.5, boostX: -5.5, boostZ: -7.5 },
-        { x: 7, y: 0.1, z: 21, r: 1.5, boostY: 14.5, boostX: 5.5, boostZ: -7.5 },
+        // Old boosts (±5.5, ±7.5) dropped every launch into the void gap; these land on the center island.
+        { x: -7, y: 0.1, z: -21, r: 1.5, boostY: 14.5, boostX: -1, boostZ: 14 },
+        { x: 7, y: 0.1, z: -21, r: 1.5, boostY: 14.5, boostX: 1, boostZ: 14 },
+        { x: -7, y: 0.1, z: 21, r: 1.5, boostY: 14.5, boostX: -1, boostZ: -14 },
+        { x: 7, y: 0.1, z: 21, r: 1.5, boostY: 14.5, boostX: 1, boostZ: -14 },
       ],
       pickups: [
         { id: 's1', type: 'shield', x: -24, y: 2.1, z: -4.5 },

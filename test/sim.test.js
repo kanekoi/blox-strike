@@ -148,6 +148,24 @@ const tests = {
     assert(fell / all < 0.25, `${fell}/${all} deaths were void falls`);
   },
 
+  'every jump pad lands a passive player safely'() {
+    for (const m of Object.values(BS.MAPS)) {
+      m.jumpPads.forEach((pad, i) => {
+        const sim = newSim({ mapId: m.id });
+        const p = addPlayer(sim, 'h');
+        for (let k = 0; k < 5; k++) sim.step(DT);
+        p.alive = true; p.x = pad.x; p.z = pad.z; p.y = pad.y + 0.1; p.vx = p.vz = p.vy = 0;
+        let landed = false;
+        for (let k = 0; k < 300 && p.alive && !landed; k++) {
+          sim.setPlayerInput('h', input({ seq: k + 1 }));
+          sim.step(DT);
+          landed = k > 20 && p.grounded;
+        }
+        assert(landed && p.alive, `${m.id} pad ${i} drops a still player into the void`);
+      });
+    }
+  },
+
   'LAN 3rd-person aim ray hits snapshot players'() {
     const server = newSim({ mapId: 'neon' });
     const me = addPlayer(server, 'me'), foe = addPlayer(server, 'foe');
