@@ -21,6 +21,10 @@ For quick visual testing, append URL parameters such as `index.html?autostart=1`
 - **Ultra-Responsive Zero-Jitter Pipeline (`60Hz`–`360Hz`)**: Frame-synchronized sub-stepped local simulation (zero VSync beat-frequency stutter or 1-tick lag), sub-frame click & jump latching, zero-lag stair step-offset decay, dirty-checked HUD updates with zero `backdrop-filter` GPU stalls, and Quake-style air steering.
 - **Hardened Security (`SECURITY.md`)**: Strict Content Security Policy (`CSP`), zero `.innerHTML` DOM sinks, `Object.create(null)` prototype-pollution guards, `NaN`/`Infinity` input sanitization, per-player flood rate limiting, entity caps, and `ws:/wss:` schema-validated packet parsing.
 - **Procedural Web Audio**: Synthesized weapon fire, hitmarker ticks, headshot dings, shatter pops, explosions, and pickup chimes.
+- **HD Weapon Meshes**: The AR, shotgun, SMG and sniper use real 1,300–1,900-triangle models (`js/weapon-meshes.js`), generated from OBJ files by `node tools/obj2js.js`. The RPG and blade keep their block models.
+
+## Credits
+- Weapon models: [Ultimate Guns Pack](https://quaternius.com/packs/ultimategun.html) by Quaternius, CC0 1.0 (`assets/models/quaternius-ultimate-guns/`).
 
 ## Multiplayer-Ready Architecture
 The codebase cleanly separates simulation from presentation:
