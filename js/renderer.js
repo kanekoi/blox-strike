@@ -1382,7 +1382,8 @@
       alpha = 1,
       worldUV = false,
       customTex = null,
-      metallic = 0
+      metallic = 0,
+      drawCount = 0 // > 0: draw that many non-indexed triangles from the bound mesh VAO instead of the cube
     ) {
       const gl = this.gl;
       gl.uniformMatrix4fv(this.u.model, false, mat);
@@ -1438,12 +1439,77 @@
         gl.uniform1i(this.u.texMode, texMode);
       }
 
-      gl.drawElements(gl.TRIANGLES, this.cube.count, gl.UNSIGNED_SHORT, 0);
+      if (drawCount > 0) gl.drawArrays(gl.TRIANGLES, 0, drawCount);
+      else gl.drawElements(gl.TRIANGLES, this.cube.count, gl.UNSIGNED_SHORT, 0);
     }
 
     _drawBox(tx, ty, tz, rx, ry, rz, sx, sy, sz, color, texType = 4, emissive = 0, alpha = 1, worldUV = false) {
       Mat4.fromTRS(this.model, tx, ty, tz, rx, ry, rz, sx, sy, sz);
       this._drawWithMatrix(this.model, sx, sy, sz, color, texType, emissive, alpha, worldUV);
+    }
+
+    // --- High-detail weapon meshes (js/weapon-meshes.js, from tools/obj2js.js) ---
+    _getWeaponMesh(id) {
+      if (!this._weaponMeshes) this._weaponMeshes = Object.create(null);
+      if (id in this._weaponMeshes) return this._weaponMeshes[id];
+      const src = BS.WEAPON_MESHES && BS.WEAPON_MESHES[id];
+      if (!src) return (this._weaponMeshes[id] = null);
+      const gl = this.gl;
+      const P = src.pos;
+      const groups = src.groups.map((g) => {
+        // Expand to non-indexed triangles with flat face normals: pos(3) norm(3) uv(2), same layout as the cube.
+        const data = new Float32Array((g.idx.length / 3) * 3 * 8);
+        let o = 0;
+        for (let t = 0; t < g.idx.length; t += 3) {
+          const a = g.idx[t] * 3, b = g.idx[t + 1] * 3, c = g.idx[t + 2] * 3;
+          const ax = P[a] / 1000, ay = P[a + 1] / 1000, az = P[a + 2] / 1000;
+          const bx = P[b] / 1000, by = P[b + 1] / 1000, bz = P[b + 2] / 1000;
+          const cx = P[c] / 1000, cy = P[c + 1] / 1000, cz = P[c + 2] / 1000;
+          let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+          let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+          let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          nx /= nl; ny /= nl; nz /= nl;
+          for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) {
+            data[o++] = x; data[o++] = y; data[o++] = z;
+            data[o++] = nx; data[o++] = ny; data[o++] = nz;
+            data[o++] = 0; data[o++] = 0;
+          }
+        }
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        const stride = 8 * 4;
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(1);
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 12);
+        gl.enableVertexAttribArray(2);
+        gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 24);
+        return { vao, count: g.idx.length, color: g.color, body: g.body };
+      });
+      gl.bindVertexArray(this.cube.vao);
+      return (this._weaponMeshes[id] = { groups });
+    }
+
+    // Draws the HD mesh for weapon `id` when one exists, else the box-part model.
+    _drawWeapon(id, parts, parentMat, palette, opts = {}) {
+      const mesh = this._getWeaponMesh(id);
+      if (!mesh) return this._drawModel(parts, parentMat, palette, opts);
+      const gl = this.gl;
+      const flash = opts.flash || 0;
+      const em = opts.emBoost || 0;
+      const metallic = opts.metallic || 0;
+      for (const g of mesh.groups) {
+        const useSkin = g.body && !!opts.skinTex;
+        const base = g.body ? (useSkin ? [1, 1, 1] : (palette && palette.body) || g.color) : g.color;
+        const col = this._resolvePartColor(base, null, flash);
+        gl.bindVertexArray(g.vao);
+        // worldUV + texScale 1.55 gives skins the same texel density as the box parts.
+        this._drawWithMatrix(parentMat, 1.55, 1.55, 1.55, col, 4, em, 1, useSkin, useSkin ? opts.skinTex : null, useSkin ? metallic : 0.35, g.count);
+      }
+      gl.bindVertexArray(this.cube.vao);
     }
 
     _getWeaponSkinSetup(w, p) {
@@ -2101,7 +2167,7 @@
         Mat4.multiply(this._mB, this._mRoot, this._mLocal);
         Mat4.fromTRS(this._mLocal, -0.08, -0.06, -0.58, isBlade ? -1.0 : 0, 0, 0, 1, 1, 1);
         Mat4.multiply(this._mA, this._mB, this._mLocal);
-        this._drawModel(wModel.parts, this._mA, skinSetup.palette, {
+        this._drawWeapon(w.id, wModel.parts, this._mA, skinSetup.palette, {
           flash: flash * 0.4,
           emBoost: em * 0.25,
           skinTex: skinSetup.skinTex,
@@ -2212,7 +2278,7 @@
       const hideWarhead = w.id === 'rocket' && (p.ammo <= 0 || p.reloading);
 
       const skinSetup = this._getWeaponSkinSetup(w, p);
-      this._drawModel(vm.parts, this._mRoot, skinSetup.palette, {
+      this._drawWeapon(w.id, vm.parts, this._mRoot, skinSetup.palette, {
         skinTex: skinSetup.skinTex,
         metallic: skinSetup.metallic,
         isBlade: skinSetup.isBlade,

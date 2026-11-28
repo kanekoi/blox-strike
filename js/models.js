@@ -13,7 +13,7 @@
       shellColor: [0.96, 0.78, 0.24],
       leftHand: [0, 0.03, -0.48],
       vmHip: [0.33, -0.43, -0.52],
-      vmAds: [0, -0.32, -0.44],
+      vmAds: [0, -0.21, -0.44], // HD mesh: front sight post tip on the crosshair
       parts: [
         { p: [0, 0.1, -0.12], s: [0.12, 0.15, 0.5], c: 'body' }, // upper/lower receiver
         { p: [0, 0.185, -0.14], s: [0.065, 0.022, 0.44], c: 'dark' }, // low-profile top rail
@@ -39,7 +39,7 @@
       shellColor: [0.92, 0.2, 0.18],
       leftHand: [0, 0.03, -0.42],
       vmHip: [0.33, -0.42, -0.5],
-      vmAds: [0, -0.25, -0.46],
+      vmAds: [0, -0.185, -0.46], // HD mesh: receiver top just under the crosshair
       parts: [
         { p: [0, 0.09, -0.1], s: [0.13, 0.15, 0.36], c: 'body' }, // receiver
         { p: [0, 0.13, -0.52], s: [0.07, 0.07, 0.56], c: 'metal' }, // heavy barrel
@@ -61,7 +61,7 @@
       shellColor: [0.96, 0.82, 0.32],
       leftHand: [0, -0.06, -0.34],
       vmHip: [0.31, -0.41, -0.48],
-      vmAds: [0, -0.265, -0.42],
+      vmAds: [0, -0.125, -0.42], // HD mesh: rear sight just under the crosshair
       parts: [
         { p: [0, 0.09, -0.1], s: [0.11, 0.16, 0.4], c: 'body' }, // compact receiver
         { p: [0, 0.08, -0.36], s: [0.1, 0.11, 0.14], c: 'dark' }, // shroud

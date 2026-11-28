@@ -300,6 +300,25 @@ const tests = {
     assert(sim.tags.every((t) => Number.isFinite(t.x + t.y + t.z)));
   },
 
+  'HD weapon meshes are valid and line up with the old muzzle'() {
+    require(path.join(__dirname, '..', 'js', 'weapon-meshes.js'));
+    for (const id of ['ar', 'shotgun', 'smg', 'sniper']) {
+      const m = BS.WEAPON_MESHES[id];
+      assert(m, `${id} mesh missing`);
+      const nVerts = m.pos.length / 3;
+      assert(m.pos.every(Number.isInteger), `${id} has non-integer positions`);
+      let tris = 0, minZ = Infinity;
+      for (const g of m.groups) {
+        assert(g.idx.length % 3 === 0 && g.idx.every((i) => i >= 0 && i < nVerts), `${id}/${g.mtl} bad index`);
+        tris += g.idx.length / 3;
+      }
+      for (let i = 2; i < m.pos.length; i += 3) minZ = Math.min(minZ, m.pos[i] / 1000);
+      assert(tris > 500, `${id} only ${tris} triangles`);
+      assert.strictEqual(m.groups.filter((g) => g.body).length, 1, `${id} needs exactly one skinnable body material`);
+      assert(Math.abs(minZ - BS.MODELS.weapons[id].muzzle[2]) < 0.01, `${id} barrel tip ${minZ} not at muzzle`);
+    }
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');
