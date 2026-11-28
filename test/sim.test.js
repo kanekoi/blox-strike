@@ -319,6 +319,37 @@ const tests = {
     }
   },
 
+  'one shot mode: sniper only, any hit kills, no grenades, self-damage normal'() {
+    const sim = newSim({ modeId: 'oneshot' });
+    const a = addPlayer(sim, 'a'), v = addPlayer(sim, 'v');
+    for (let i = 0; i < 300; i++) sim.step(DT);
+    assert.strictEqual(a.weaponId, 'sniper');
+    sim.setPlayerInput('a', input({ seq: 1, weaponSlot: 1 }));
+    sim.step(DT);
+    assert.strictEqual(a.weaponId, 'sniper', 'weapon switch must be locked');
+    v.spawnProtect = 0; v.shield = 50; v.hp = v.maxHp;
+    sim._applyDamage(a, v, 1, 'sniper', false, 0, 0, 0);
+    assert(!v.alive, 'a 1-damage hit should kill in One Shot');
+    a.spawnProtect = 0; a.hp = 100; a.shield = 0;
+    sim._applyDamage(null, a, 10, 'rocket', false, 0, 0, 0);
+    assert.strictEqual(a.hp, 90, 'self/world damage stays normal');
+    a.grenadeCooldown = 0;
+    sim.setPlayerInput('a', input({ seq: 2, grenade: true }));
+    sim.step(DT);
+    assert.strictEqual(sim.projectiles.filter((pr) => pr.kind === 'grenade').length, 0, 'no grenades in One Shot');
+  },
+
+  'one shot bot match ends at the kill limit with sniper kills only'() {
+    const sim = newSim({ modeId: 'oneshot', botCount: 7, mapId: 'neon' });
+    const weapons = new Set();
+    for (let i = 0; i < 60 * 300 && !sim.matchOver; i++) {
+      for (const e of sim.step(DT) || []) if (e.type === 'kill' && e.killerId) weapons.add(e.weaponId);
+    }
+    assert(sim.matchOver, 'match never ended');
+    assert(sim.players.some((p) => p.kills >= sim.mode.scoreLimit), 'nobody reached the kill limit');
+    assert([...weapons].every((w) => w === 'sniper' || w === 'void' || w === 'barrel'), `unexpected kill weapons: ${[...weapons]}`);
+  },
+
   'self rocket kill is not credited to THE VOID'() {
     const sim = newSim();
     const p = addPlayer(sim, 'Me');

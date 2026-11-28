@@ -810,6 +810,12 @@
         this._showBanner('ARSENAL LADDER', 'GET KOs TO AUTO-UPGRADE WEAPON!', 1.2);
         return;
       }
+      const activeMode = BS.MODES[activeModeId];
+      if (activeMode && activeMode.lockedWeapon) {
+        const lw = BS.WEAPON_BY_ID[activeMode.lockedWeapon];
+        this._showBanner(activeMode.name.toUpperCase(), `${lw ? lw.name : 'ONE WEAPON'} ONLY`, 1.2);
+        return;
+      }
       const actualSlot = this._getActualWeaponSlot();
       if (slot !== actualSlot || this.desiredWeaponSlot !== slot) {
         if (slot !== actualSlot) {
@@ -1418,7 +1424,7 @@
       // Persistent weapon-slot handshake: keep sending desiredWeaponSlot until authoritative sim confirms it!
       if (this.desiredWeaponSlot !== null && localSimP) {
         const curW = BS.WEAPON_BY_ID[localSimP.weaponId];
-        if ((this.sim.mode && this.sim.mode.id === 'gungame') || (curW && curW.slot === this.desiredWeaponSlot)) {
+        if ((this.sim.mode && (this.sim.mode.id === 'gungame' || this.sim.mode.lockedWeapon)) || (curW && curW.slot === this.desiredWeaponSlot)) {
           this.desiredWeaponSlot = null;
         }
       }

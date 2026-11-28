@@ -522,6 +522,8 @@
       if (this.mode.id === 'gungame') {
         const w = BS.WEAPONS[clamp(p.gunGameTier, 0, BS.WEAPONS.length - 1)];
         p.weaponId = w.id;
+      } else if (this.mode.lockedWeapon) {
+        p.weaponId = this.mode.lockedWeapon;
       } else if (p.isBot && p.ai) {
         // Bots freely rotate through ALL 6 weapons on respawn!
         if (Math.random() < 0.6) {
@@ -902,7 +904,8 @@
 
     _applyWeaponSlotSwitch(p) {
       const inp = p.input;
-      if (this.mode.id !== 'gungame' && inp.weaponSlot !== null) {
+      if (this.mode.lockedWeapon && p.weaponId !== this.mode.lockedWeapon) p.weaponId = this.mode.lockedWeapon;
+      if (this.mode.id !== 'gungame' && !this.mode.lockedWeapon && inp.weaponSlot !== null) {
         const w = BS.WEAPONS.find((item) => item.slot === inp.weaponSlot);
         if (w && w.id !== p.weaponId) {
           p.weaponId = w.id;
@@ -944,7 +947,7 @@
       }
 
       // Tactical Frag Blox Grenade ([G]) — usable anytime off cooldown without interrupting weapon state!
-      if (inp.grenade && p.grenadeCooldown <= 0) {
+      if (inp.grenade && p.grenadeCooldown <= 0 && !this.mode.noGrenades) {
         this._throwGrenade(p);
       }
 
@@ -1538,6 +1541,8 @@
     _applyDamage(attacker, victim, amount, weaponId, headshot, hx, hy, hz) {
       if (!victim.alive || victim.spawnProtect > 0) return;
       const totalBefore = victim.hp + victim.shield;
+      // One Shot mode: any hit from another player is lethal (self-damage stays normal).
+      if (this.mode.oneHitKill && attacker && attacker !== victim) amount = Math.max(amount, totalBefore);
       let rem = amount;
       if (victim.shield > 0) {
         const absorbed = Math.min(victim.shield, rem);
@@ -1701,9 +1706,9 @@
           } else if (this.scores.red >= this.mode.scoreLimit) {
             this._finishMatch('RED TEAM', 'Reached elimination limit!');
           }
-        } else if (this.mode.id === 'ffa') {
+        } else if (this.mode.id === 'ffa' || this.mode.id === 'oneshot') {
           if (killer.kills >= this.mode.scoreLimit) {
-            this._finishMatch(killer.name, 'Dominated Free-For-All!');
+            this._finishMatch(killer.name, this.mode.id === 'oneshot' ? 'Sharpest shot in the arena!' : 'Dominated Free-For-All!');
           }
         } else if (this.mode.id === 'gungame') {
           // Final tier must be finished with its own weapon (no grenade/barrel wins).
@@ -2008,7 +2013,7 @@
       inp.reload = false;
 
       // Dynamic all-weapon selection (bots can use any of the 6 weapons freely outside Gun Game!)
-      if (this.mode.id !== 'gungame') {
+      if (this.mode.id !== 'gungame' && !this.mode.lockedWeapon) {
         let pickPool = null;
         if (target && bot.weaponId === 'rocket' && targetDist < 4.8) {
           // Don't blow yourself up at point-blank range

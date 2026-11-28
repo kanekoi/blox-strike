@@ -444,6 +444,19 @@
     },
   };
 
+  BS.MODES.oneshot = {
+    id: 'oneshot',
+    name: 'One Shot',
+    short: '1-SHOT',
+    description: 'Free-for-all with RAIL-BLOX snipers only. Every hit kills, no grenades. First to 20!',
+    scoreLimit: 20,
+    timeLimit: 300,
+    teams: false,
+    lockedWeapon: 'sniper',
+    oneHitKill: true,
+    noGrenades: true,
+  };
+
   BS.KILL_CONFIRMED = {
     TAG_LIFE: 25, // seconds a dropped tag stays before vanishing
     CONFIRM_SCORE: 50,
